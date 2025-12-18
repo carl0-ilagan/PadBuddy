@@ -30,11 +30,12 @@ export default function PageLoader() {
               alt="PadBuddy Logo" 
               width={120} 
               height={120}
-              className="relative drop-shadow-2xl"
+              className="relative drop-shadow-2xl w-auto h-auto"
+              priority
             />
           </div>
         </div>
-        <h1 className="text-5xl font-black text-white mb-2 tracking-tight drop-shadow-lg animate-pulse">
+        <h1 className="text-5xl font-black text-white mb-2 tracking-tight drop-shadow-lg animate-pulse" style={{ fontFamily: "'Courier New', Courier, monospace" }}>
           padbuddy
         </h1>
       </div>

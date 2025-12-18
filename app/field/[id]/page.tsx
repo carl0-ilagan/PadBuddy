@@ -341,94 +341,162 @@ export default function FieldDetail() {
           </div>
         </nav>
 
-        {/* Tab Navigation */}
-        <div className="bg-white/80 backdrop-blur-md shadow-md border-b border-green-100 sticky top-16 z-20">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <nav className="flex flex-wrap justify-center sm:justify-start -mb-px">
-                <button
-                  onClick={() => setActiveTab('overview')}
-                  className={`py-3 px-4 sm:py-4 sm:px-6 text-xs sm:text-sm font-bold border-b-3 transition-all whitespace-nowrap ${
-                    activeTab === 'overview'
-                      ? 'border-green-600 text-green-700 bg-green-50'
-                      : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                >
-                  Overview
-                </button>
-                <button
-                  onClick={() => setActiveTab('paddies')}
-                  className={`py-3 px-4 sm:py-4 sm:px-6 text-xs sm:text-sm font-bold border-b-3 transition-all whitespace-nowrap ${
-                    activeTab === 'paddies'
-                      ? 'border-green-600 text-green-700 bg-green-50'
-                      : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                >
-                  Paddies
-                </button>
-                {hasDevices && (
-                  <button
-                    onClick={() => setActiveTab('statistics')}
-                    className={`py-3 px-4 sm:py-4 sm:px-6 text-xs sm:text-sm font-bold border-b-3 transition-all whitespace-nowrap ${
-                      activeTab === 'statistics'
-                        ? 'border-green-600 text-green-700 bg-green-50'
-                        : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
-                  >
-                    Statistics
-                  </button>
-                )}
-                <button
-                  onClick={() => setActiveTab('information')}
-                  className={`py-3 px-4 sm:py-4 sm:px-6 text-xs sm:text-sm font-bold border-b-3 transition-all whitespace-nowrap ${
-                    activeTab === 'information'
-                      ? 'border-green-600 text-green-700 bg-green-50'
-                      : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                >
-                  Information
-                </button>
-            </nav>
-          </div>
+        {/* Bottom Tab Navigation - Facebook Style */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50 safe-area-bottom">
+          <nav className="max-w-lg mx-auto flex justify-around items-center h-16 px-2">
+            {/* Overview Tab */}
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 ${
+                activeTab === 'overview'
+                  ? 'text-green-600'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              {/* Active Indicator */}
+              <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
+                activeTab === 'overview' ? 'bg-green-600' : 'bg-transparent'
+              }`} />
+              {/* Icon */}
+              <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'overview' ? 'scale-110' : ''}`} fill={activeTab === 'overview' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'overview' ? 0 : 2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+              {/* Label - only show when active */}
+              <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
+                activeTab === 'overview' ? 'opacity-100' : 'opacity-0 h-0'
+              }`}>Overview</span>
+            </button>
+
+            {/* Paddies Tab */}
+            <button
+              onClick={() => setActiveTab('paddies')}
+              className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 ${
+                activeTab === 'paddies'
+                  ? 'text-green-600'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
+                activeTab === 'paddies' ? 'bg-green-600' : 'bg-transparent'
+              }`} />
+              <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'paddies' ? 'scale-110' : ''}`} fill={activeTab === 'paddies' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'paddies' ? 0 : 2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+              <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
+                activeTab === 'paddies' ? 'opacity-100' : 'opacity-0 h-0'
+              }`}>Paddies</span>
+            </button>
+
+            {/* Statistics Tab */}
+            {hasDevices && (
+              <button
+                onClick={() => setActiveTab('statistics')}
+                className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 ${
+                  activeTab === 'statistics'
+                    ? 'text-green-600'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
+                  activeTab === 'statistics' ? 'bg-green-600' : 'bg-transparent'
+                }`} />
+                <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'statistics' ? 'scale-110' : ''}`} fill={activeTab === 'statistics' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'statistics' ? 0 : 2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
+                  activeTab === 'statistics' ? 'opacity-100' : 'opacity-0 h-0'
+                }`}>Stats</span>
+              </button>
+            )}
+
+            {/* Information Tab */}
+            <button
+              onClick={() => setActiveTab('information')}
+              className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 ${
+                activeTab === 'information'
+                  ? 'text-green-600'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-all duration-300 ${
+                activeTab === 'information' ? 'bg-green-600' : 'bg-transparent'
+              }`} />
+              <svg className={`w-6 h-6 transition-transform duration-300 ${activeTab === 'information' ? 'scale-110' : ''}`} fill={activeTab === 'information' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={activeTab === 'information' ? 0 : 2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className={`text-[10px] font-semibold mt-0.5 transition-all duration-300 ${
+                activeTab === 'information' ? 'opacity-100' : 'opacity-0 h-0'
+              }`}>Info</span>
+            </button>
+          </nav>
         </div>
 
-        {/* Content */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Tab Content */}
-          {activeTab === 'overview' && (
-            <OverviewTab field={field} paddies={paddies} />
-          )}
+        {/* Content with smooth transitions */}
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24">
+          {/* Tab Content with Fade Transition */}
+          <div className="relative">
+            {/* Overview Tab */}
+            <div className={`transition-all duration-300 ease-in-out ${
+              activeTab === 'overview' 
+                ? 'opacity-100 translate-y-0' 
+                : 'opacity-0 translate-y-4 absolute inset-0 pointer-events-none'
+            }`}>
+              {activeTab === 'overview' && <OverviewTab field={field} paddies={paddies} />}
+            </div>
 
-          {activeTab === 'paddies' && (
-            <PaddiesTab 
-              paddies={paddies} 
-              deviceReadings={deviceReadings} 
-              fieldId={fieldId}
-              onAddDevice={() => setIsAddDeviceModalOpen(true)}
-              onViewLocation={handleViewLocation}
-            />
-          )}
+            {/* Paddies Tab */}
+            <div className={`transition-all duration-300 ease-in-out ${
+              activeTab === 'paddies' 
+                ? 'opacity-100 translate-y-0' 
+                : 'opacity-0 translate-y-4 absolute inset-0 pointer-events-none'
+            }`}>
+              {activeTab === 'paddies' && (
+                <PaddiesTab 
+                  paddies={paddies} 
+                  deviceReadings={deviceReadings} 
+                  fieldId={fieldId}
+                  onAddDevice={() => setIsAddDeviceModalOpen(true)}
+                  onViewLocation={handleViewLocation}
+                />
+              )}
+            </div>
 
-          {activeTab === 'statistics' && hasDevices && (
-            <StatisticsTab paddies={paddies} deviceReadings={deviceReadings} fieldId={fieldId} />
-          )}
+            {/* Statistics Tab */}
+            <div className={`transition-all duration-300 ease-in-out ${
+              activeTab === 'statistics' 
+                ? 'opacity-100 translate-y-0' 
+                : 'opacity-0 translate-y-4 absolute inset-0 pointer-events-none'
+            }`}>
+              {activeTab === 'statistics' && hasDevices && (
+                <StatisticsTab paddies={paddies} deviceReadings={deviceReadings} fieldId={fieldId} />
+              )}
+            </div>
 
-          {activeTab === 'information' && (
-            <InformationTab 
-              field={{ ...field, id: fieldId }} 
-              onFieldUpdate={() => {
-                // Re-fetch field data after status change
-                const fetchUpdatedField = async () => {
-                  if (!user) return;
-                  const fieldRef = doc(db, `users/${user.uid}/fields/${fieldId}`);
-                  const fieldSnap = await getDoc(fieldRef);
-                  if (fieldSnap.exists()) {
-                    setField({ id: fieldSnap.id, ...fieldSnap.data() });
-                  }
-                };
-                fetchUpdatedField();
-              }}
-            />
-          )}
+            {/* Information Tab */}
+            <div className={`transition-all duration-300 ease-in-out ${
+              activeTab === 'information' 
+                ? 'opacity-100 translate-y-0' 
+                : 'opacity-0 translate-y-4 absolute inset-0 pointer-events-none'
+            }`}>
+              {activeTab === 'information' && (
+                <InformationTab 
+                  field={{ ...field, id: fieldId }} 
+                  onFieldUpdate={() => {
+                    // Re-fetch field data after status change
+                    const fetchUpdatedField = async () => {
+                      if (!user) return;
+                      const fieldRef = doc(db, `users/${user.uid}/fields/${fieldId}`);
+                      const fieldSnap = await getDoc(fieldRef);
+                      if (fieldSnap.exists()) {
+                        setField({ id: fieldSnap.id, ...fieldSnap.data() });
+                      }
+                    };
+                    fetchUpdatedField();
+                  }}
+                />
+              )}
+            </div>
+          </div>
         </main>
         
         {/* Add Device Modal */}

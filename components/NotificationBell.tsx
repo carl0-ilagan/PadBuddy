@@ -71,7 +71,7 @@ export default function NotificationBell() {
       {/* Bell Icon Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors"
+        className="relative p-2 text-white hover:text-white hover:bg-white/20 rounded-full transition-colors"
         aria-label="Notifications"
       >
         <svg 
@@ -96,9 +96,14 @@ export default function NotificationBell() {
         )}
       </button>
 
-      {/* Dropdown Panel */}
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-lg shadow-2xl border border-gray-200 z-50 max-h-[80vh] flex flex-col">
+      {/* Dropdown Panel with Smooth Animation */}
+      <div
+        className={`absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-lg shadow-2xl border border-gray-200 z-50 max-h-[80vh] flex flex-col transition-all duration-300 ease-out ${
+          isOpen
+            ? 'opacity-100 translate-y-0 pointer-events-auto'
+            : 'opacity-0 -translate-y-2 pointer-events-none'
+        }`}
+      >
           {/* Header */}
           <div className="p-4 border-b border-gray-200 flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900">Notifications</h3>
@@ -190,7 +195,6 @@ export default function NotificationBell() {
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }

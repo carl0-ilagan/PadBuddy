@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { NotificationProvider } from "@/context/NotificationContext";
 import PageLoader from "@/components/PageLoader";
+import OfflineIndicator from "@/components/OfflineIndicator";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,12 +25,13 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "PadBuddy",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
   themeColor: "#059669",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-  },
 };
 
 export default function RootLayout({
@@ -48,6 +50,7 @@ export default function RootLayout({
       >
         <AuthProvider>
           <NotificationProvider>
+            <OfflineIndicator />
             <PageLoader />
             {children}
           </NotificationProvider>
@@ -58,12 +61,50 @@ export default function RootLayout({
               window.addEventListener('load', function() {
                 navigator.serviceWorker.register('/service-worker.js').then(
                   function(registration) {
-                    console.log('ServiceWorker registration successful');
+                    console.log('[PWA] ServiceWorker registration successful');
+                    
+                    // Check for updates periodically
+                    setInterval(function() {
+                      registration.update();
+                    }, 60000); // Check every minute
+                    
+                    // Handle updates
+                    registration.addEventListener('updatefound', function() {
+                      var newWorker = registration.installing;
+                      console.log('[PWA] New service worker found');
+                      
+                      newWorker.addEventListener('statechange', function() {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                          // New content available, show update prompt
+                          console.log('[PWA] New content available');
+                          if (confirm('May bagong update ang PadBuddy! I-refresh para makuha ang latest version.')) {
+                            newWorker.postMessage({ type: 'SKIP_WAITING' });
+                            window.location.reload();
+                          }
+                        }
+                      });
+                    });
                   },
                   function(err) {
-                    console.log('ServiceWorker registration failed: ', err);
+                    console.log('[PWA] ServiceWorker registration failed: ', err);
                   }
                 );
+                
+                // Handle controller change
+                navigator.serviceWorker.addEventListener('controllerchange', function() {
+                  console.log('[PWA] Controller changed');
+                });
+              });
+              
+              // Log online/offline status
+              window.addEventListener('online', function() {
+                console.log('[PWA] Back online');
+                document.body.classList.remove('offline');
+              });
+              
+              window.addEventListener('offline', function() {
+                console.log('[PWA] Gone offline');
+                document.body.classList.add('offline');
               });
             }
           `

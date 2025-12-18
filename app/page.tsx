@@ -4,19 +4,34 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
 import Image from "next/image";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { getVarietyNames } from "@/lib/utils/varietyHelpers";
 import { db, database } from "@/lib/firebase";
 import { doc, getDoc, setDoc, collection, addDoc, updateDoc, serverTimestamp, query, getDocs, orderBy } from "firebase/firestore";
 import { ref, get, update } from "firebase/database";
 import NotificationBell from "@/components/NotificationBell";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Menu, Search, HelpCircle, Info, LogOut, Home as HomeIcon, BookOpen, X, TrendingUp, Sprout, Smartphone, AlertTriangle, CheckCircle, Shield } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import Banner from "@/components/Banner";
+import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
+
+// Admin email for access control
+const ADMIN_EMAIL = 'ricepaddy.contact@gmail.com';
 
 export default function Home() {
   const { user, signOut } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const { visibility } = usePageVisibility();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalStep, setModalStep] = useState(1);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   
   // Step 1 form data
   const [fieldName, setFieldName] = useState("");
@@ -34,6 +49,14 @@ export default function Home() {
   // Fields list
   const [fields, setFields] = useState<any[]>([]);
   const [loadingFields, setLoadingFields] = useState(true);
+  
+  // Dashboard stats
+  const [stats, setStats] = useState({
+    totalFields: 0,
+    totalDevices: 0,
+    healthyDevices: 0,
+    issueDevices: 0
+  });
   
   const handleStep1Submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,6 +90,10 @@ export default function Home() {
       const q = query(fieldsRef, orderBy("createdAt", "desc"));
       const querySnapshot = await getDocs(q);
       
+      let totalDevices = 0;
+      let healthyDevices = 0;
+      let issueDevices = 0;
+      
       const fieldsData = await Promise.all(querySnapshot.docs.map(async (fieldDoc) => {
         const fieldData = { id: fieldDoc.id, ...fieldDoc.data() };
         
@@ -75,11 +102,12 @@ export default function Home() {
           const paddiesRef = collection(db, "users", user.uid, "fields", fieldDoc.id, "paddies");
           const paddiesSnapshot = await getDocs(paddiesRef);
           
-          let totalDevices = 0;
-          let offlineDevices = 0;
-          let issueDevices = 0;
+          let fieldTotalDevices = 0;
+          let fieldOfflineDevices = 0;
+          let fieldIssueDevices = 0;
           
           paddiesSnapshot.forEach(paddyDoc => {
+            fieldTotalDevices++;
             totalDevices++;
             const paddyData = paddyDoc.data();
             
@@ -88,19 +116,23 @@ export default function Home() {
             const hasReadings = false; // TODO: Check actual sensor readings
             
             if (!hasHeartbeat && !hasReadings) {
-              offlineDevices++;
-            } else if (hasHeartbeat && !hasReadings) {
+              fieldOfflineDevices++;
               issueDevices++;
+            } else if (hasHeartbeat && !hasReadings) {
+              fieldIssueDevices++;
+              issueDevices++;
+            } else {
+              healthyDevices++;
             }
           });
           
           return {
             ...fieldData,
             deviceStats: {
-              total: totalDevices,
-              offline: offlineDevices,
-              issues: issueDevices,
-              healthy: totalDevices - offlineDevices - issueDevices
+              total: fieldTotalDevices,
+              offline: fieldOfflineDevices,
+              issues: fieldIssueDevices,
+              healthy: fieldTotalDevices - fieldOfflineDevices - fieldIssueDevices
             }
           };
         } catch (error) {
@@ -110,6 +142,12 @@ export default function Home() {
       }));
       
       setFields(fieldsData);
+      setStats({
+        totalFields: fieldsData.length,
+        totalDevices,
+        healthyDevices,
+        issueDevices
+      });
     } catch (error) {
       console.error("Error fetching fields:", error);
     } finally {
@@ -250,147 +288,221 @@ export default function Home() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 pb-24">
-        <nav className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-30 border-b border-green-100">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 pb-24">
+        {/* Navigation Bar */}
+        <nav className="bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 sticky top-0 z-50 shadow-lg">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center gap-3">
-                <Image src="/icons/rice_logo.png" alt="PadBuddy" width={40} height={40} className="drop-shadow-md" />
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-green-600 to-emerald-700 bg-clip-text text-transparent">Padbuddy</h1>
+                <div className="relative">
+                  <Image src="/icons/rice_logo.png" alt="PadBuddy" width={36} height={36} className="rounded-lg shadow-sm" />
+                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-white rounded-full animate-pulse"></div>
+                </div>
+                <h1 className="text-xl font-bold text-white" style={{ fontFamily: "'Courier New', Courier, monospace" }}>PadBuddy</h1>
               </div>
               <div className="flex items-center gap-2">
-                {/* Hamburger Menu */}
-                <button 
-                  onClick={() => setIsMenuOpen(true)}
-                  className="p-2 hover:bg-green-50 rounded-xl transition-colors"
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSearchModalOpen(true)}
+                  className="hover:bg-white/20 text-white"
                 >
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    className="h-6 w-6 text-green-700" 
-                    fill="none" 
-                    viewBox="0 0 24 24" 
-                    stroke="currentColor"
-                  >
-                    <path 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round" 
-                      strokeWidth={2} 
-                      d="M4 6h16M4 12h16M4 18h16" 
-                    />
-                  </svg>
-                </button>
+                  <Search className="h-5 w-5" />
+                </Button>
+                <NotificationBell />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsMenuOpen(true)}
+                  className="hover:bg-white/20 text-white"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
               </div>
             </div>
           </div>
         </nav>
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Fields List */}
-          {loadingFields ? (
-            <div className="flex justify-center items-center py-20">
-              <svg className="animate-spin h-10 w-10 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            </div>
-          ) : fields.length === 0 ? (
-            <div className="text-center py-20">
-              <div className="bg-gradient-to-br from-green-100 to-emerald-100 rounded-full w-24 h-24 flex items-center justify-center mx-auto mb-6 shadow-lg">
-                <svg className="h-12 w-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                </svg>
-              </div>
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">No fields yet</h3>
-              <p className="text-gray-600 text-lg">Get started by adding your first field</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {fields.map((field) => (
-                <div
-                  key={field.id}
-                  onClick={() => router.push(`/field/${field.id}`)}
-                  className="bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer overflow-hidden border border-green-100 hover:border-green-300 hover:-translate-y-1"
-                >
-                  <div className="p-6">
-                    <div className="flex items-start justify-between mb-2">
-                      <h3 className="text-xl font-bold text-gray-900">{field.fieldName}</h3>
-                      <div className="flex flex-col items-end gap-1.5">
-                        {/* Field Status Badge */}
-                        {field.status === 'harvested' && (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            🌾 Harvested
-                          </span>
-                        )}
-                        {field.status === 'concluded' && (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                            🔚 Season Ended
-                          </span>
-                        )}
-                        {/* Device Status Badge (only for active fields) */}
-                        {(!field.status || field.status === 'active') && field.deviceStats && field.deviceStats.total > 0 && (
-                          <div>
-                            {field.deviceStats.offline > 0 ? (
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                ✗ {field.deviceStats.offline} Offline
-                              </span>
-                            ) : field.deviceStats.issues > 0 ? (
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                ⚠ {field.deviceStats.issues} Issue{field.deviceStats.issues > 1 ? 's' : ''}
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                ✓ All OK
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center text-sm text-gray-600">
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-                        </svg>
-                        {field.riceVariety}
-                      </div>
-                      <div className="flex items-center text-sm text-gray-600">
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        Started {new Date(field.startDay).toLocaleDateString()}
-                      </div>
-                      {field.deviceStats && field.deviceStats.total > 0 && (
-                        <div className="flex items-center text-sm text-gray-600">
-                          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                          </svg>
-                          {field.deviceStats.total} {field.deviceStats.total === 1 ? 'Device' : 'Devices'}
-                        </div>
-                      )}
-                      {field.description && (
-                        <p className="text-sm text-gray-500 mt-3 line-clamp-2">{field.description}</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="bg-green-50 px-6 py-3 border-t border-green-100">
-                    <span className="text-sm text-green-700 font-medium">View Details →</span>
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          {/* Dashboard Overview Banner */}
+          <Banner
+            variant="gradient"
+            title="Dashboard Overview"
+            description="Monitor your rice farming operations at a glance"
+            icon={<TrendingUp className="h-6 w-6" />}
+          />
+
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 gap-4 mt-6">
+            {/* Total Fields */}
+            <Card className="border-0 shadow-md bg-white">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-600">Total Fields</span>
+                  <div className="h-10 w-10 rounded-lg bg-green-600 flex items-center justify-center">
+                    <Sprout className="h-5 w-5 text-white" />
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+                <p className="text-3xl font-bold text-green-600">{stats.totalFields}</p>
+                <p className="text-xs text-gray-500 mt-1">Active fields</p>
+              </CardContent>
+            </Card>
+
+            {/* Total Devices */}
+            <Card className="border-0 shadow-md bg-white">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-600">Total Devices</span>
+                  <div className="h-10 w-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                    <Smartphone className="h-5 w-5 text-white" />
+                  </div>
+                </div>
+                <p className="text-3xl font-bold text-blue-500">{stats.totalDevices}</p>
+                <p className="text-xs text-gray-500 mt-1">Connected devices</p>
+              </CardContent>
+            </Card>
+
+            {/* Healthy Devices */}
+            <Card className="border-0 shadow-md bg-white">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-600">Healthy Devices</span>
+                  <div className="h-10 w-10 rounded-lg bg-emerald-500 flex items-center justify-center">
+                    <CheckCircle className="h-5 w-5 text-white" />
+                  </div>
+                </div>
+                <p className="text-3xl font-bold text-emerald-500">{stats.healthyDevices}</p>
+                <p className="text-xs text-gray-500 mt-1">Working properly</p>
+              </CardContent>
+            </Card>
+
+            {/* Issues */}
+            <Card className="border-0 shadow-md bg-white">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-600">Issues</span>
+                  <div className="h-10 w-10 rounded-lg bg-orange-500 flex items-center justify-center">
+                    <AlertTriangle className="h-5 w-5 text-white" />
+                  </div>
+                </div>
+                <p className="text-3xl font-bold text-orange-500">{stats.issueDevices}</p>
+                <p className="text-xs text-gray-500 mt-1">Need attention</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Your Fields Section */}
+          <div className="mt-8">
+            <h2 className="text-2xl font-bold text-gray-900">Your Fields</h2>
+            <p className="text-gray-600 mt-1">Manage and monitor your rice fields</p>
+          </div>
+
+          {/* Fields List */}
+          <div className="mt-4">
+            {loadingFields ? (
+              <div className="flex justify-center items-center py-20">
+                <svg className="animate-spin h-10 w-10 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            ) : fields.length === 0 ? (
+              <Card className="border-0 shadow-md bg-white">
+                <CardContent className="text-center py-12">
+                  <div className="bg-gradient-to-br from-green-100 to-emerald-100 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4 shadow-lg">
+                    <Sprout className="h-10 w-10 text-green-600" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">No fields yet</h3>
+                  <p className="text-gray-600">Get started by adding your first field</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {fields.map((field) => (
+                  <Card
+                    key={field.id}
+                    onClick={() => router.push(`/field/${field.id}`)}
+                    className="border-0 shadow-md bg-white hover:shadow-xl transition-all duration-300 cursor-pointer"
+                  >
+                    <CardContent className="p-5">
+                      <div className="flex items-start justify-between mb-3">
+                        <h3 className="text-lg font-bold text-gray-900">{field.fieldName}</h3>
+                        <div className="flex flex-col items-end gap-1.5">
+                          {/* Field Status Badge */}
+                          {field.status === 'harvested' && (
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              🌾 Harvested
+                            </span>
+                          )}
+                          {field.status === 'concluded' && (
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                              🔚 Season Ended
+                            </span>
+                          )}
+                          {/* Device Status Badge (only for active fields) */}
+                          {(!field.status || field.status === 'active') && field.deviceStats && field.deviceStats.total > 0 && (
+                            <div>
+                              {field.deviceStats.offline > 0 ? (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                                  {field.deviceStats.offline} Offline
+                                </span>
+                              ) : field.deviceStats.issues > 0 ? (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
+                                  {field.deviceStats.issues} Issue{field.deviceStats.issues > 1 ? 's' : ''}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                  All OK
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Sprout className="w-4 h-4 mr-2 text-green-600" />
+                          {field.riceVariety}
+                        </div>
+                        <div className="flex items-center text-sm text-gray-600">
+                          <TrendingUp className="w-4 h-4 mr-2 text-blue-500" />
+                          Started {new Date(field.startDay).toLocaleDateString()}
+                        </div>
+                        {field.deviceStats && field.deviceStats.total > 0 && (
+                          <div className="flex items-center text-sm text-gray-600">
+                            <Smartphone className="w-4 h-4 mr-2 text-green-500" />
+                            {field.deviceStats.total} {field.deviceStats.total === 1 ? 'Device' : 'Devices'}
+                          </div>
+                        )}
+                        {field.description && (
+                          <p className="text-sm text-gray-500 mt-2 line-clamp-2">{field.description}</p>
+                        )}
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-gray-100">
+                        <span className="text-sm text-green-600 font-medium flex items-center">
+                          View Details
+                          <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
         </main>
 
         {/* Floating Action Button */}
         <button 
           onClick={() => setIsModalOpen(true)}
-          className="fixed bottom-8 right-8 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-full shadow-2xl hover:shadow-3xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all flex items-center gap-2 px-6 py-4 z-40 text-base font-bold group"
+          className="fixed bottom-8 right-8 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-full shadow-2xl hover:shadow-3xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center w-14 h-14 z-40"
         >
-          <span className="text-2xl group-hover:rotate-90 transition-transform duration-300">+</span>
-          Add Field
+          <span className="text-3xl font-light">+</span>
         </button>
 
-        {/* Bottom Sheet Modal */}
+        {/* Bottom Sheet Modal for Add Field */}
         {isModalOpen && (
           <>
             {/* Glassmorphism Overlay */}
@@ -648,133 +760,249 @@ export default function Home() {
           </>
         )}
 
-        {/* Side Menu */}
-        {isMenuOpen && (
-          <>
-            {/* Overlay */}
-            <div 
-              onClick={() => setIsMenuOpen(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 transition-opacity"
-            />
-            
-            {/* Menu Panel */}
-            <div className="fixed top-0 right-0 bottom-0 w-80 bg-white shadow-2xl z-50 animate-slide-in-right">
-              <div className="flex flex-col h-full">
-                {/* Menu Header */}
-                <div className="p-6 border-b border-gray-200">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-xl font-bold text-gray-900">Menu</h2>
-                    <button
-                      onClick={() => setIsMenuOpen(false)}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                      <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                  
-                  {/* User Info */}
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                      <span className="text-green-700 font-semibold text-lg">
-                        {user?.email?.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{user?.email}</p>
-                      <p className="text-xs text-gray-500">Rice Farmer</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Menu Items */}
-                <div className="flex-1 overflow-y-auto py-4">
-                  <nav className="space-y-1 px-3">
-                    {/* My Fields */}
-                    <button
-                      onClick={() => {
-                        router.push('/');
-                        setIsMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v18l7-3 7 3V3H5z" />
-                      </svg>
-                      <span className="font-medium">My Fields</span>
-                    </button>
-
-                    <div className="h-px bg-gray-200 my-3"></div>
-
-                    {/* Rice Varieties */}
-                    <button
-                      onClick={() => {
-                        setIsMenuOpen(false);
-                        // TODO: Navigate to rice varieties page
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                      <span className="font-medium">Rice Varieties</span>
-                    </button>
-
-                    <div className="h-px bg-gray-200 my-3"></div>
-
-                    {/* Help & Support */}
-                    <button
-                      onClick={() => {
-                        setIsMenuOpen(false);
-                        // TODO: Navigate to help page
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span className="font-medium">Help & Support</span>
-                    </button>
-
-                    {/* About */}
-                    <button
-                      onClick={() => {
-                        setIsMenuOpen(false);
-                        // TODO: Navigate to about page
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span className="font-medium">About PadBuddy</span>
-                    </button>
-                  </nav>
-                </div>
-
-                {/* Sign Out */}
-                <div className="p-4 border-t border-gray-200">
-                  <button
-                    onClick={async () => {
-                      if (confirm('Are you sure you want to sign out?')) {
-                        await signOut();
-                        setIsMenuOpen(false);
-                        router.push('/auth');
-                      }
-                    }}
-                    className="w-full flex items-center justify-center gap-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                    </svg>
-                    Sign Out
-                  </button>
-                </div>
+        {/* Search Modal */}
+        <Sheet open={isSearchModalOpen} onOpenChange={setIsSearchModalOpen}>
+          <SheetContent side="bottom" className="h-[80vh] rounded-t-3xl">
+            <SheetHeader>
+              <SheetTitle>Search Fields</SheetTitle>
+            </SheetHeader>
+            <div className="mt-6">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search fields..."
+                  className="w-full pl-10 pr-4 py-3 rounded-xl border-0 shadow-md focus:ring-2 focus:ring-green-200 bg-white focus:outline-none"
+                />
               </div>
             </div>
-          </>
-        )}
+          </SheetContent>
+        </Sheet>
+
+        {/* Sidebar Menu */}
+        <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+          <SheetContent side="right" className="w-[300px] sm:w-[400px]">
+            <SheetHeader className="relative">
+              <SheetTitle className="text-xl font-bold">Menu</SheetTitle>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsMenuOpen(false)}
+                className="absolute right-0 top-0 h-8 w-8 rounded-full hover:bg-accent transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </SheetHeader>
+            <div className="flex flex-col h-[calc(100%-4rem)] mt-6">
+              {/* User Info */}
+              <div className="flex items-center gap-3 pb-6 border-b border-green-200/50 animate-fade-in">
+                {user?.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || user.email || "User"}
+                    className="w-12 h-12 rounded-full object-cover ring-2 ring-primary/20 shadow-md"
+                  />
+                ) : (
+                  <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center ring-2 ring-primary/20 shadow-md">
+                    <span className="text-primary-foreground font-semibold text-lg">
+                      {user?.displayName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate text-gray-800">
+                    {user?.displayName || user?.email?.split('@')[0] || 'User'}
+                  </p>
+                  <p className="text-xs text-gray-600">Rice Farmer</p>
+                </div>
+              </div>
+
+              {/* Menu Items */}
+              <nav className="flex-1 py-4 space-y-2 overflow-y-auto min-h-0">
+                <Button
+                  variant={pathname === '/' ? "default" : "ghost"}
+                  className={`w-full justify-start transition-all duration-200 relative ${
+                    pathname === '/' 
+                      ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
+                      : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
+                  }`}
+                  onClick={() => {
+                    router.push('/');
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
+                    pathname === '/' ? 'bg-white' : 'bg-transparent'
+                  }`} />
+                  <HomeIcon className={`mr-3 h-5 w-5 transition-transform duration-200 ${
+                    pathname === '/' ? 'scale-110' : 'group-hover:scale-110'
+                  }`} />
+                  <span className="font-medium">My Fields</span>
+                </Button>
+                <Button
+                  variant={pathname === '/varieties' ? "default" : "ghost"}
+                  className={`w-full justify-start transition-all duration-200 relative ${
+                    pathname === '/varieties' 
+                      ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
+                      : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
+                  }`}
+                  onClick={() => {
+                    router.push('/varieties');
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
+                    pathname === '/varieties' ? 'bg-white' : 'bg-transparent'
+                  }`} />
+                  <BookOpen className={`mr-3 h-5 w-5 transition-transform duration-200 ${
+                    pathname === '/varieties' ? 'scale-110' : 'group-hover:scale-110'
+                  }`} />
+                  <span className="font-medium">Rice Varieties</span>
+                </Button>
+                {visibility.helpPageVisible && (
+                  <Button
+                    variant={pathname === '/help' ? "default" : "ghost"}
+                    className={`w-full justify-start transition-all duration-200 relative ${
+                      pathname === '/help' 
+                        ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
+                        : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
+                    }`}
+                    onClick={() => {
+                      router.push('/help');
+                      setIsMenuOpen(false);
+                    }}
+                  >
+                    <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
+                      pathname === '/help' ? 'bg-white' : 'bg-transparent'
+                    }`} />
+                    <HelpCircle className={`mr-3 h-5 w-5 transition-transform duration-200 ${
+                      pathname === '/help' ? 'scale-110' : 'group-hover:scale-110'
+                    }`} />
+                    <span className="font-medium">Help & Support</span>
+                  </Button>
+                )}
+                {visibility.aboutPageVisible && (
+                  <Button
+                    variant={pathname === '/about' ? "default" : "ghost"}
+                    className={`w-full justify-start transition-all duration-200 relative ${
+                      pathname === '/about' 
+                        ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
+                        : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
+                    }`}
+                    onClick={() => {
+                      router.push('/about');
+                      setIsMenuOpen(false);
+                    }}
+                  >
+                    <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
+                      pathname === '/about' ? 'bg-white' : 'bg-transparent'
+                    }`} />
+                    <Info className={`mr-3 h-5 w-5 transition-transform duration-200 ${
+                      pathname === '/about' ? 'scale-110' : 'group-hover:scale-110'
+                    }`} />
+                    <span className="font-medium">About PadBuddy</span>
+                  </Button>
+                )}
+
+                {/* Admin Panel - Only visible to admin */}
+                {user?.email === ADMIN_EMAIL && (
+                  <>
+                    <div className="border-t border-gray-200 my-3"></div>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start transition-all duration-200 relative bg-purple-50 hover:bg-purple-100 text-purple-700"
+                      onClick={() => {
+                        router.push('/admin');
+                        setIsMenuOpen(false);
+                      }}
+                    >
+                      <Shield className="mr-3 h-5 w-5" />
+                      <span className="font-medium">Admin Panel</span>
+                    </Button>
+                  </>
+                )}
+              </nav>
+
+              {/* Sign Out */}
+              <div className="pt-4 border-t border-green-200/50 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="w-full bg-gradient-to-b from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium py-3 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg active:scale-[0.98]"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsLogoutModalOpen(true);
+                  }}
+                >
+                  <LogOut className="mr-2 h-5 w-5" />
+                  Sign Out
+                </Button>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        {/* Logout Confirmation Modal */}
+        <Dialog open={isLogoutModalOpen} onOpenChange={setIsLogoutModalOpen}>
+          <DialogContent className="sm:max-w-md rounded-2xl border-0 shadow-2xl bg-white animate-fade-in">
+            <DialogHeader className="text-center pb-4">
+              <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center shadow-md">
+                <LogOut className="h-8 w-8 text-red-600" />
+              </div>
+              <DialogTitle className="text-2xl font-bold text-gray-900">
+                Sign Out?
+              </DialogTitle>
+              <DialogDescription className="text-base text-gray-600 pt-2 px-2">
+                Are you sure you want to sign out? You'll need to sign in again to access your fields.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-row gap-3 pt-4 pb-2">
+              <Button
+                variant="ghost"
+                onClick={() => setIsLogoutModalOpen(false)}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 font-medium py-3 rounded-xl transition-all active:scale-[0.98] border-0"
+                disabled={isLoggingOut}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={async () => {
+                  setIsLoggingOut(true);
+                  try {
+                    setIsMenuOpen(false);
+                    setIsLogoutModalOpen(false);
+                    await signOut();
+                    router.push('/auth');
+                  } catch (error) {
+                    console.error('Sign out error:', error);
+                    setIsLoggingOut(false);
+                    setIsLogoutModalOpen(false);
+                    alert('Failed to sign out. Please try again.');
+                  }
+                }}
+                disabled={isLoggingOut}
+                className="flex-1 bg-gradient-to-b from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium py-3 rounded-xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 active:scale-[0.98]"
+              >
+                {isLoggingOut ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Signing out...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <LogOut className="h-4 w-4" />
+                    Sign Out
+                  </span>
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </ProtectedRoute>
   );

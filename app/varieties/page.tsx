@@ -96,22 +96,22 @@ export default function RiceVarietiesPage() {
     <ProtectedRoute>
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50">
         {/* Navigation Bar */}
-        <nav className="border-b bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
+        <nav className="bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 sticky top-0 z-50 shadow-lg">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <Image src="/icons/rice_logo.png" alt="PadBuddy" width={36} height={36} className="rounded-lg shadow-sm" />
-                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-primary rounded-full animate-pulse"></div>
+                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-white rounded-full animate-pulse"></div>
                 </div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-emerald-600 bg-clip-text text-transparent">PadBuddy</h1>
+                <h1 className="text-xl font-bold text-white" style={{ fontFamily: "'Courier New', Courier, monospace" }}>PadBuddy</h1>
               </div>
 
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative"
+                  className="relative hover:bg-white/20 text-white"
                   onClick={() => setIsSearchModalOpen(true)}
                 >
                   <Search className="h-5 w-5" />
@@ -121,7 +121,7 @@ export default function RiceVarietiesPage() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setIsMenuOpen(true)}
-                  className="hover:bg-accent"
+                  className="hover:bg-white/20 text-white"
                 >
                   <Menu className="h-5 w-5" />
                 </Button>
@@ -139,20 +139,6 @@ export default function RiceVarietiesPage() {
             icon={<BookOpen className="h-6 w-6" />}
           />
 
-          {/* Search Bar */}
-          <div className="mt-6 mb-6">
-            <div className="relative max-w-md mx-auto">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <Input
-                type="text"
-                placeholder="Search rice varieties..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-3 rounded-xl border-2 border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-200"
-              />
-            </div>
-          </div>
-
           {/* Varieties Grid */}
           {loading ? (
             <div className="text-center py-12">
@@ -160,7 +146,7 @@ export default function RiceVarietiesPage() {
               <p className="mt-4 text-gray-600">Loading rice varieties...</p>
             </div>
           ) : filteredVarieties.length === 0 ? (
-            <Card className="mt-6">
+            <Card className="mt-6 border-0 shadow-md">
               <CardContent className="py-12 text-center">
                 <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-600">No rice varieties found matching your search.</p>
@@ -171,7 +157,7 @@ export default function RiceVarietiesPage() {
               {filteredVarieties.map((variety, index) => (
                 <Card
                   key={index}
-                  className="hover:shadow-lg transition-all duration-300 cursor-pointer border-2 border-transparent hover:border-green-200"
+                  className="hover:shadow-lg transition-all duration-300 cursor-pointer border-0 shadow-md"
                   onClick={() => setSelectedVariety(variety)}
                 >
                   <CardHeader>
@@ -281,15 +267,15 @@ export default function RiceVarietiesPage() {
                 <div>
                   <h3 className="font-semibold text-gray-900 mb-3">NPK Recommendations (per hectare)</h3>
                   <div className="grid grid-cols-3 gap-3 mb-3">
-                    <Card className="p-3">
+                    <Card className="p-3 border-0 shadow-sm bg-gray-50">
                       <p className="text-xs text-gray-500 mb-1">Nitrogen (N)</p>
                       <p className="font-medium">{selectedVariety.recommended_npk_per_ha.N}</p>
                     </Card>
-                    <Card className="p-3">
+                    <Card className="p-3 border-0 shadow-sm bg-gray-50">
                       <p className="text-xs text-gray-500 mb-1">Phosphorus (P₂O₅)</p>
                       <p className="font-medium">{selectedVariety.recommended_npk_per_ha.P2O5}</p>
                     </Card>
-                    <Card className="p-3">
+                    <Card className="p-3 border-0 shadow-sm bg-gray-50">
                       <p className="text-xs text-gray-500 mb-1">Potassium (K₂O)</p>
                       <p className="font-medium">{selectedVariety.recommended_npk_per_ha.K2O}</p>
                     </Card>
@@ -325,25 +311,25 @@ export default function RiceVarietiesPage() {
                     <h3 className="font-semibold text-gray-900 mb-3">Agronomic Characteristics</h3>
                     <div className="grid grid-cols-2 gap-3">
                       {selectedVariety.agronomic_stats.plant_height_cm && (
-                        <Card className="p-3">
+                        <Card className="p-3 border-0 shadow-sm bg-gray-50">
                           <p className="text-xs text-gray-500 mb-1">Plant Height</p>
                           <p className="font-medium">{selectedVariety.agronomic_stats.plant_height_cm}</p>
                         </Card>
                       )}
                       {selectedVariety.agronomic_stats.yield_potential_t_ha && (
-                        <Card className="p-3">
+                        <Card className="p-3 border-0 shadow-sm bg-gray-50">
                           <p className="text-xs text-gray-500 mb-1">Yield Potential</p>
                           <p className="font-medium">{selectedVariety.agronomic_stats.yield_potential_t_ha}</p>
                         </Card>
                       )}
                       {selectedVariety.agronomic_stats.tillering && (
-                        <Card className="p-3">
+                        <Card className="p-3 border-0 shadow-sm bg-gray-50">
                           <p className="text-xs text-gray-500 mb-1">Tillering</p>
                           <p className="font-medium">{selectedVariety.agronomic_stats.tillering}</p>
                         </Card>
                       )}
                       {(selectedVariety.agronomic_stats.lodging_resistance || selectedVariety.agronomic_stats.lodging_wind_resistance) && (
-                        <Card className="p-3">
+                        <Card className="p-3 border-0 shadow-sm bg-gray-50">
                           <p className="text-xs text-gray-500 mb-1">Lodging Resistance</p>
                           <p className="font-medium">
                             {selectedVariety.agronomic_stats.lodging_resistance || selectedVariety.agronomic_stats.lodging_wind_resistance}
@@ -403,7 +389,7 @@ export default function RiceVarietiesPage() {
                   placeholder="Search rice varieties..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-3 rounded-xl border-2 border-gray-200 focus:border-green-500"
+                  className="pl-10 pr-4 py-3 rounded-xl border-0 shadow-md focus:ring-2 focus:ring-green-200 bg-white"
                 />
               </div>
               <div className="mt-6 space-y-3 max-h-[60vh] overflow-y-auto">
@@ -583,7 +569,7 @@ export default function RiceVarietiesPage() {
 
         {/* Logout Confirmation Modal */}
         <Dialog open={isLogoutModalOpen} onOpenChange={setIsLogoutModalOpen}>
-          <DialogContent className="sm:max-w-md rounded-2xl border-2 border-red-200/50 shadow-2xl bg-white animate-fade-in">
+          <DialogContent className="sm:max-w-md rounded-2xl border-0 shadow-2xl bg-white animate-fade-in">
             <DialogHeader className="text-center pb-4">
               <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center shadow-md">
                 <LogOut className="h-8 w-8 text-red-600" />
@@ -597,9 +583,9 @@ export default function RiceVarietiesPage() {
             </DialogHeader>
             <div className="flex flex-row gap-3 pt-4 pb-2">
               <Button
-                variant="outline"
+                variant="ghost"
                 onClick={() => setIsLogoutModalOpen(false)}
-                className="flex-1 border-2 border-gray-300 hover:bg-gray-50 font-medium py-3 rounded-xl transition-all active:scale-[0.98]"
+                className="flex-1 bg-gray-100 hover:bg-gray-200 font-medium py-3 rounded-xl transition-all active:scale-[0.98] border-0"
                 disabled={isLoggingOut}
               >
                 Cancel

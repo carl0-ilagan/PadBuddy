@@ -2,52 +2,68 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users collection - users can read/write their own document
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == 'ricepaddy.contact@gmail.com';
+    }
+    
+    // Users collection - users can read/write their own document, admins can read all
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow write: if request.auth != null && request.auth.uid == userId;
+      allow delete: if isAdmin();
       
       // Subcollection: Fields under users
       match /fields/{fieldId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow write: if request.auth != null && request.auth.uid == userId;
         
         // Subcollection: Paddies under fields
         match /paddies/{paddyId} {
-          allow read, write: if request.auth != null && request.auth.uid == userId;
+          allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+          allow write: if request.auth != null && request.auth.uid == userId;
           
           // Subcollection: Logs under paddies
           match /logs/{logId} {
-            allow read, write: if request.auth != null && request.auth.uid == userId;
+            allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+            allow write: if request.auth != null && request.auth.uid == userId;
           }
         }
         
         // Subcollection: Tasks under fields
         match /tasks/{taskId} {
-          allow read, write: if request.auth != null && request.auth.uid == userId;
+          allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+          allow write: if request.auth != null && request.auth.uid == userId;
         }
       }
       
       // Subcollection: Notifications under users
       match /notifications/{notificationId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow write: if request.auth != null && request.auth.uid == userId;
       }
     }
     
-    // Top-level Fields collection - users can read/write their own fields
+    // Top-level Fields collection - users can read/write their own fields, admins can read all
     match /fields/{fieldId} {
-      allow read, write: if request.auth != null && 
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if request.auth != null && 
         (resource == null || resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin();
     }
     
-    // Devices collection - users can read/write devices associated with their fields
+    // Devices collection - users can read/write devices, admins have full access
     match /devices/{deviceId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null;
+      allow delete: if isAdmin();
     }
     
-    // Top-level Notifications collection - users can read their own notifications
+    // Top-level Notifications collection - users can read their own, admins can read all
     match /notifications/{notificationId} {
       allow read: if request.auth != null && 
-        (resource == null || resource.data.userId == request.auth.uid);
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin());
       allow write: if request.auth != null;
     }
     
@@ -55,6 +71,12 @@ service cloud.firestore {
     match /activities/{activityId} {
       allow read: if request.auth != null;
       allow write: if false;
+    }
+    
+    // Settings collection - read for all authenticated users, write for admins only
+    match /settings/{settingId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
     }
   }
 }

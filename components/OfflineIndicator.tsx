@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { WifiOff, Wifi } from 'lucide-react';
+import { WifiOff, Wifi, CloudOff } from 'lucide-react';
 
 export default function OfflineIndicator() {
   const [isOnline, setIsOnline] = useState(true);
@@ -42,32 +42,37 @@ export default function OfflineIndicator() {
     <div
       className={`fixed top-0 left-0 right-0 z-[100] transition-all duration-300 ${
         showIndicator
-          ? isOnline
-            ? 'animate-slide-down'
-            : 'animate-slide-down'
+          ? 'animate-slide-down'
           : 'translate-y-[-100%]'
       }`}
     >
       <div
-        className={`mx-4 mt-4 rounded-lg shadow-lg p-3 flex items-center gap-3 ${
+        className={`mx-4 mt-4 rounded-xl shadow-lg p-3 flex items-center gap-3 ${
           isOnline
-            ? 'bg-green-500 text-white'
-            : 'bg-red-500 text-white'
+            ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white'
+            : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
         }`}
       >
         {isOnline ? (
           <>
-            <Wifi className="h-5 w-5" />
-            <span className="text-sm font-medium">Back online</span>
+            <Wifi className="h-5 w-5 flex-shrink-0" />
+            <div className="flex-1">
+              <span className="text-sm font-semibold">Back online!</span>
+              <span className="text-xs opacity-90 ml-2">Syncing data...</span>
+            </div>
           </>
         ) : (
           <>
-            <WifiOff className="h-5 w-5" />
-            <span className="text-sm font-medium">No network connection</span>
+            <CloudOff className="h-5 w-5 flex-shrink-0" />
+            <div className="flex-1">
+              <span className="text-sm font-semibold">You&apos;re offline</span>
+              <span className="text-xs opacity-90 ml-2">Cached pages available</span>
+            </div>
           </>
         )}
       </div>
     </div>
   );
 }
+
 
