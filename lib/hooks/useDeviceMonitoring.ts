@@ -12,8 +12,9 @@ interface DeviceMonitorConfig {
   enabled?: boolean;
 }
 
-const OFFLINE_THRESHOLD = 2 * 60 * 1000; // 2 minutes in milliseconds
-const CHECK_INTERVAL = 30 * 1000; // Check every 30 seconds
+const OFFLINE_THRESHOLD = 10 * 60 * 1000; // 10 minutes in milliseconds (increased from 2 minutes)
+const CHECK_INTERVAL = 60 * 1000; // Check every 60 seconds (increased from 30 seconds)
+const NOTIFICATION_COOLDOWN = 30 * 60 * 1000; // 30 minutes cooldown between notifications for same device
 
 /**
  * Monitor device status and NPK readings
@@ -22,6 +23,7 @@ const CHECK_INTERVAL = 30 * 1000; // Check every 30 seconds
 export function useDeviceMonitoring(configs: DeviceMonitorConfig[]) {
   const lastStatusRef = useRef<{ [key: string]: { online: boolean; hasNPK: boolean } }>({});
   const notificationSentRef = useRef<{ [key: string]: boolean }>({});
+  const lastNotificationTimeRef = useRef<{ [key: string]: number }>({}); // Track when last notification was sent
 
   useEffect(() => {
     if (configs.length === 0 || !configs.some(c => c.enabled !== false)) return;
@@ -38,6 +40,7 @@ export function useDeviceMonitoring(configs: DeviceMonitorConfig[]) {
       if (!lastStatusRef.current[deviceId]) {
         lastStatusRef.current[deviceId] = { online: true, hasNPK: true };
         notificationSentRef.current[deviceId] = false;
+        lastNotificationTimeRef.current[deviceId] = 0;
       }
 
       // Listen to device data in real-time
@@ -132,12 +135,23 @@ export function useDeviceMonitoring(configs: DeviceMonitorConfig[]) {
   ) => {
     const lastStatus = lastStatusRef.current[deviceId];
     const notificationSent = notificationSentRef.current[deviceId];
+    const lastNotificationTime = lastNotificationTimeRef.current[deviceId] || 0;
+    const now = Date.now();
+    const timeSinceLastNotification = now - lastNotificationTime;
 
     // Device went offline
-    if (lastStatus.online && !isOnline && !notificationSent) {
-      console.log(`[Monitor] Device ${deviceId} went offline`);
-      await notifyDeviceOffline(userId, deviceId, paddyName, fieldId, fieldName);
-      notificationSentRef.current[deviceId] = true;
+    if (lastStatus.online && !isOnline) {
+      // Only send notification if:
+      // 1. We haven't sent one yet for this offline event, OR
+      // 2. It's been more than the cooldown period since the last notification
+      if (!notificationSent || timeSinceLastNotification >= NOTIFICATION_COOLDOWN) {
+        console.log(`[Monitor] Device ${deviceId} went offline`);
+        await notifyDeviceOffline(userId, deviceId, paddyName, fieldId, fieldName);
+        notificationSentRef.current[deviceId] = true;
+        lastNotificationTimeRef.current[deviceId] = now;
+      } else {
+        console.log(`[Monitor] Device ${deviceId} still offline, but notification cooldown active (${Math.round((NOTIFICATION_COOLDOWN - timeSinceLastNotification) / 60000)} min remaining)`);
+      }
     }
 
     // Device came back online
@@ -145,6 +159,7 @@ export function useDeviceMonitoring(configs: DeviceMonitorConfig[]) {
       console.log(`[Monitor] Device ${deviceId} came back online`);
       await notifyDeviceOnline(userId, deviceId, paddyName, fieldId, fieldName);
       notificationSentRef.current[deviceId] = false;
+      lastNotificationTimeRef.current[deviceId] = now; // Reset cooldown when device comes back
     }
 
     // Update last status

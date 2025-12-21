@@ -575,6 +575,17 @@ export default function FieldDetail() {
             </div>
           </div>
         </main>
+
+        {/* Floating Action Button - Add Paddy (only on Paddies tab) */}
+        {activeTab === 'paddies' && (
+          <button 
+            onClick={() => setIsAddDeviceModalOpen(true)}
+            className="fixed bottom-8 right-8 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-full shadow-2xl hover:shadow-3xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center w-14 h-14 z-40"
+            title="Add New Paddy"
+          >
+            <span className="text-3xl font-light">+</span>
+          </button>
+        )}
         
         {/* Add Device Modal */}
         {isAddDeviceModalOpen && (
@@ -1279,15 +1290,6 @@ function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onViewLocat
           })}
         </div>
       )}
-
-      {/* Floating Action Button - Add Paddy */}
-      <button 
-        onClick={onAddDevice}
-        className="fixed bottom-8 right-8 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-full shadow-2xl hover:shadow-3xl hover:from-green-700 hover:to-emerald-700 active:scale-95 transition-all flex items-center justify-center w-14 h-14 z-40"
-        title="Add New Paddy"
-      >
-        <span className="text-3xl font-light">+</span>
-      </button>
     </div>
   );
 }
