@@ -1,4 +1,4 @@
-export type NotificationType = 
+export type NotificationType =
   | 'device_offline'
   | 'device_online'
   | 'task_reminder'

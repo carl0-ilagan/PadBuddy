@@ -47,22 +47,20 @@ The Statistics tab automatically fetches and displays historical logs based on s
 
 ## Integration Points
 
-### 1. Automatic Logging (TODO)
-When device readings are received from Firebase RTDB, automatically log them:
+### 1. Automatic Logging (Cloud Function)
+Sensor updates written by devices via RTDB (using PUT to fixed paths) are mirrored into Firestore for history by a Cloud Function:
 
-```typescript
-// In device reading listener
-realtimeDb.ref(`devices/${deviceId}/readings`).on('value', (snapshot) => {
-  const readings = snapshot.val();
-  
-  // Log to Firestore for history
-  await logSensorReading(user.uid, fieldId, paddyId, {
-    nitrogen: readings.N,
-    phosphorus: readings.P,
-    potassium: readings.K
-  });
-});
-```
+Implementation: functions/src/index.ts → `logDeviceSensorUpdates`
+
+Trigger: `/devices/{deviceId}/sensors`
+
+Behavior:
+- Reads `nitrogen`, `phosphorus`, `potassium` and `lastUpdate`
+- Finds bound paddy via `collectionGroup('paddies').where('deviceId', '==', deviceId)`
+- Writes to `users/{userId}/fields/{fieldId}/paddies/{paddyId}/logs/{logId}`
+- If no paddy bound, writes to `deviceLogs/{deviceId}/readings/{logId}`
+
+This keeps RTDB lean (current-only state) while Firestore stores historical time-series.
 
 ### 2. Manual Logging
 For testing or manual data entry, use the `logSensorReading()` function directly.
@@ -111,14 +109,9 @@ For production, implement periodic logging (recommended intervals):
 - **Temperature/Humidity**: Every 30 minutes (environmental monitoring)
 - **Water Level**: Every hour (irrigation management)
 
-## Visualization (Coming Soon)
+## Visualization
 
-The Data Trends section will display:
-- Line charts showing NPK levels over time
-- Average values with min/max ranges
-- Comparison across multiple paddies
-- Growth stage correlation
-- Recommendations based on trends
+The Data Trends section on the device page renders line charts for N, P, K over the selected time range using `react-chartjs-2`. Data is sourced from Firestore logs under the paddy.
 
 ## Database Costs
 

@@ -1,21 +1,51 @@
 'use client';
 
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { useParams, useRouter } from "next/navigation";
+import {
+  Chart as ChartJS,
+  LineElement,
+  PointElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
+
+// Register Chart.js components
+ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
+import { useParams, useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db, database } from '@/lib/firebase';
-import { doc, getDoc, collection, getDocs, updateDoc, query, where } from 'firebase/firestore';
-import { ref, get } from 'firebase/database';
+import { doc, getDoc, collection, getDocs, updateDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { ref, get, onValue, update } from 'firebase/database';
+import NotificationBell from "@/components/NotificationBell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Menu, Home as HomeIcon, BookOpen, HelpCircle, Info, LogOut, Shield } from "lucide-react";
+import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
+
+// Admin email for access control
+const ADMIN_EMAIL = 'ricepaddy.contact@gmail.com';
 
 export default function DeviceDetail() {
   const params = useParams();
   const router = useRouter();
-  const { user } = useAuth();
+  const pathname = usePathname();
+  const { user, signOut } = useAuth();
+  const { visibility } = usePageVisibility();
   const deviceId = params.id as string;
+  
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('7d');
   const [historicalLogs, setHistoricalLogs] = useState<any[]>([]);
+  const [realtimeLogs, setRealtimeLogs] = useState<any[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<any>(null);
   const [paddyInfo, setPaddyInfo] = useState<any>(null);
@@ -24,42 +54,307 @@ export default function DeviceDetail() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [gpsData, setGpsData] = useState<any>(null);
   const [loadingGps, setLoadingGps] = useState(false);
-  
-  // Fetch device data from RTDB and auto-log
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  const [weatherData, setWeatherData] = useState<{ temperature: number | null; humidity: number | null; loading: boolean }>({
+    temperature: null,
+    humidity: null,
+    loading: false
+  });
+  const [isEditingPaddyName, setIsEditingPaddyName] = useState(false);
+  const [paddyNameValue, setPaddyNameValue] = useState('');
+  const [isSavingPaddyName, setIsSavingPaddyName] = useState(false);
+
+  // Import and use live NPK hook
+  const { useLiveNPK } = require('@/lib/hooks/useLiveNPK');
+  const liveNPK = useLiveNPK(deviceId);
+
+  // Fetch weather data based on device GPS location
   useEffect(() => {
-    const fetchDeviceData = async () => {
-      if (!user || !paddyInfo || !fieldInfo) return;
+    const fetchWeatherData = async () => {
+      if (!deviceId) {
+        console.log('[Weather] No deviceId');
+        return;
+      }
+      
+      console.log('[Weather] Fetching weather for device:', deviceId);
+      setWeatherData(prev => ({ ...prev, loading: true }));
       
       try {
-        const { getDeviceData, getDeviceStatus } = await import('@/lib/utils/deviceStatus');
-        const { autoLogReadings } = await import('@/lib/utils/sensorLogging');
-        const deviceData = await getDeviceData(deviceId);
-        const status = await getDeviceStatus(deviceId);
+        // First, try to get cached weather data from RTDB (if available and recent)
+        const weatherRef = ref(database, `devices/${deviceId}/weather`);
+        const weatherSnapshot = await get(weatherRef);
         
-        if (deviceData) {
-          setDeviceInfo(deviceData);
-          setDeviceReadings([{ deviceId, ...deviceData }]);
+        if (weatherSnapshot.exists()) {
+          const cachedWeather = weatherSnapshot.val();
+          const cacheAge = Date.now() - (cachedWeather.timestamp || 0);
+          const maxCacheAge = 10 * 60 * 1000; // 10 minutes
           
-          // Auto-log NPK readings if available
-          if (deviceData.npk && (deviceData.npk.n !== undefined || deviceData.npk.p !== undefined || deviceData.npk.k !== undefined)) {
-            await autoLogReadings(user.uid, fieldInfo.id, paddyInfo.id, deviceData.npk);
+          // Use cached data if it's less than 10 minutes old
+          if (cacheAge < maxCacheAge && (cachedWeather.temperature !== null || cachedWeather.humidity !== null)) {
+            console.log('[Weather] Using cached weather data');
+            setWeatherData({
+              temperature: cachedWeather.temperature ?? null,
+              humidity: cachedWeather.humidity ?? null,
+              loading: false
+            });
+            // Still fetch fresh data in background (don't await)
+            fetchFreshWeather();
+            return;
           }
         }
+        
+        // No valid cache, fetch fresh data
+        await fetchFreshWeather();
       } catch (error) {
-        console.error('Error fetching device data:', error);
+        console.error('[Weather] Error fetching weather data:', error);
+        setWeatherData({ temperature: null, humidity: null, loading: false });
       }
     };
     
-    fetchDeviceData();
+    const fetchFreshWeather = async () => {
+      try {
+        // Get GPS coordinates from RTDB
+        const gpsRef = ref(database, `devices/${deviceId}/gps`);
+        const gpsSnapshot = await get(gpsRef);
+        
+        if (!gpsSnapshot.exists()) {
+          console.log('[Weather] No GPS data found in RTDB');
+          setWeatherData({ temperature: null, humidity: null, loading: false });
+          return;
+        }
+        
+        const gps = gpsSnapshot.val();
+        console.log('[Weather] GPS data:', gps);
+        
+        if (!gps.lat || !gps.lng) {
+          console.log('[Weather] GPS missing lat/lng');
+          setWeatherData({ temperature: null, humidity: null, loading: false });
+          return;
+        }
+        
+        // Fetch weather from Open-Meteo API (free, no API key required)
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${gps.lat}&longitude=${gps.lng}&current=temperature_2m,relative_humidity_2m&timezone=auto`;
+        console.log('[Weather] Fetching from:', weatherUrl);
+        const response = await fetch(weatherUrl);
+        
+        if (!response.ok) {
+          throw new Error('Weather API request failed');
+        }
+        
+        const data = await response.json();
+        console.log('[Weather] API response:', data);
+        
+        const temperature = data.current?.temperature_2m ?? null;
+        const humidity = data.current?.relative_humidity_2m ?? null;
+        
+        console.log('[Weather] Temperature:', temperature, 'Humidity:', humidity);
+        
+        setWeatherData({
+          temperature,
+          humidity,
+          loading: false
+        });
+        
+        // Store weather data to RTDB for historical record
+        if (temperature !== null || humidity !== null) {
+          console.log('[Weather] Storing to RTDB...');
+          const weatherRef = ref(database, `devices/${deviceId}/weather`);
+          await update(weatherRef, {
+            temperature,
+            humidity,
+            timestamp: Date.now(),
+            source: 'open-meteo'
+          });
+          console.log('[Weather] Stored successfully');
+        }
+      } catch (error) {
+        console.error('[Weather] Error fetching fresh weather data:', error);
+        setWeatherData({ temperature: null, humidity: null, loading: false });
+      }
+    };
     
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchDeviceData, 30000);
+    fetchWeatherData();
+    
+    // Refresh weather data every 10 minutes
+    const interval = setInterval(fetchWeatherData, 10 * 60 * 1000);
+    
     return () => clearInterval(interval);
-  }, [deviceId, user, paddyInfo, fieldInfo]);
-  
-  // Get device status
+  }, [deviceId]);
+
+  // Sync live data to state and auto-log
+  useEffect(() => {
+    if (!liveNPK.data || !user || !paddyInfo || !fieldInfo) return;
+
+    setDeviceInfo((prev: any) => ({
+      ...prev,
+      npk: liveNPK.data,
+      status: liveNPK.online ? 'connected' : 'disconnected',
+      connectedAt: new Date().toISOString(),
+    }));
+    setDeviceReadings([{ deviceId, npk: liveNPK.data, status: liveNPK.online ? 'connected' : 'disconnected' }]);
+
+    // Auto-log NPK readings if available
+    (async () => {
+      const { autoLogReadings } = await import('@/lib/utils/sensorLogging');
+      if (liveNPK.data.n !== undefined || liveNPK.data.p !== undefined || liveNPK.data.k !== undefined) {
+        await autoLogReadings(user.uid, fieldInfo.id, paddyInfo.id, {
+          n: liveNPK.data.n,
+          p: liveNPK.data.p,
+          k: liveNPK.data.k,
+          timestamp: liveNPK.data.timestamp,
+        });
+      }
+    })();
+  }, [liveNPK.data, user, paddyInfo, fieldInfo, deviceId]);
+
+  // Real-time RTDB listener for live chart updates
+  useEffect(() => {
+    if (!deviceId) return;
+
+    const npkRef = ref(database, `devices/${deviceId}/npk`);
+    const unsubscribe = onValue(npkRef, (snapshot) => {
+      if (!snapshot.exists()) return;
+      
+      const data = snapshot.val();
+      // Use ESP32 timestamp if valid (in milliseconds), otherwise use current time
+      const timestamp = data.timestamp && data.timestamp > 1700000000000 
+        ? new Date(data.timestamp) 
+        : new Date();
+      
+      // Only add if we have actual NPK values
+      if (data.n !== undefined || data.p !== undefined || data.k !== undefined) {
+        const newLog = {
+          id: `rtdb-${Date.now()}`,
+          timestamp,
+          nitrogen: data.n,
+          phosphorus: data.p,
+          potassium: data.k,
+          _src: 'rtdb'
+        };
+        
+        setRealtimeLogs(prev => {
+          // Dedupe by NPK values (same n, p, k = same reading)
+          const lastLog = prev[prev.length - 1];
+          const isDuplicate = lastLog && 
+            lastLog.nitrogen === data.n && 
+            lastLog.phosphorus === data.p && 
+            lastLog.potassium === data.k;
+          
+          if (isDuplicate) return prev;
+          
+          // Keep only last 10 real-time entries
+          const updated = [...prev, newLog].slice(-10);
+          return updated;
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [deviceId]);
+  useEffect(() => {
+    if (!user || !paddyInfo || !fieldInfo) return;
+    setIsLoadingLogs(true);
+
+    const now = new Date();
+    let startDate = new Date();
+    switch (timeRange) {
+      case '7d': startDate.setDate(now.getDate() - 7); break;
+      case '30d': startDate.setDate(now.getDate() - 30); break;
+      case '90d': startDate.setDate(now.getDate() - 90); break;
+      case 'all': startDate = new Date(0); break;
+    }
+
+    // Keep latest snapshots for merge/dedupe
+    let latestPaddy: any[] = [];
+    let latestDevice: any[] = [];
+
+    const mergeAndSet = () => {
+      const merged = [...latestPaddy, ...latestDevice].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      const deduped: any[] = [];
+      const seen = new Set<string>();
+      for (const log of merged) {
+        // Use document ID if available, otherwise use a combination of timestamp, values, and source
+        // This ensures we don't lose legitimate readings that might have similar timestamps
+        const key = log.id 
+          ? `${log._src || 'unknown'}-${log.id}` 
+          : `${log._src || 'unknown'}-${log.timestamp.getTime()}-${log.nitrogen ?? ''}-${log.phosphorus ?? ''}-${log.potassium ?? ''}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduped.push(log);
+        }
+      }
+      setHistoricalLogs(deduped);
+      setIsLoadingLogs(false);
+    };
+
+    // Primary: paddy logs listener
+    const paddyRef = collection(db, `users/${user.uid}/fields/${fieldInfo.id}/paddies/${paddyInfo.id}/logs`);
+    const pq = timeRange === 'all' ? paddyRef : query(paddyRef, where('timestamp', '>=', startDate));
+    const unsubPaddy = onSnapshot(pq, (snapshot) => {
+      const arr: any[] = [];
+      snapshot.forEach((doc) => {
+        const data: any = doc.data();
+        const logDate = data.timestamp?.toDate?.() || new Date(data.timestamp);
+        if (logDate >= startDate) {
+          arr.push({ ...data, id: doc.id, timestamp: logDate, _src: 'paddy' });
+        }
+      });
+      latestPaddy = arr;
+      mergeAndSet();
+    }, (err) => {
+      console.error('Paddy logs listener error:', err);
+    });
+
+    // Fallback: device logs listener
+    const deviceRef = collection(db, `deviceLogs/${deviceId}/readings`);
+    const dq = timeRange === 'all' ? deviceRef : query(deviceRef, where('timestamp', '>=', startDate));
+    const unsubDevice = onSnapshot(dq, (snapshot) => {
+      const arr: any[] = [];
+      snapshot.forEach((doc) => {
+        const data: any = doc.data();
+        const logDate = data.timestamp?.toDate?.() || new Date(data.timestamp);
+        if (logDate >= startDate) {
+          arr.push({ ...data, id: doc.id, timestamp: logDate, _src: 'device' });
+        }
+      });
+      latestDevice = arr;
+      mergeAndSet();
+    }, (err) => {
+      console.error('Device logs listener error:', err);
+    });
+
+    return () => {
+      try { unsubPaddy(); } catch {}
+      try { unsubDevice(); } catch {}
+    };
+  }, [user, paddyInfo, fieldInfo, timeRange, deviceId]);
+
+  // Reset to page 1 when time range changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [timeRange]);
+    
+  // Get device status - use liveNPK directly from RTDB
   const getDeviceStatusDisplay = () => {
-    if (!deviceInfo) {
+    const isOnline = liveNPK.online;
+    const hasNPK = liveNPK.data && (
+      liveNPK.data.n !== undefined || 
+      liveNPK.data.p !== undefined || 
+      liveNPK.data.k !== undefined
+    );
+    
+    if (liveNPK.loading) {
+      return {
+        status: 'loading',
+        message: 'Connecting to device...',
+        color: 'gray',
+        badge: 'Loading',
+        lastUpdate: 'Connecting...'
+      };
+    }
+    
+    if (!liveNPK.data && !isOnline) {
       return {
         status: 'offline',
         message: 'Device not found or offline.',
@@ -69,30 +364,23 @@ export default function DeviceDetail() {
       };
     }
     
-    const deviceStatus = deviceInfo.status || 'disconnected';
-    const hasNPK = deviceInfo.npk && (
-      deviceInfo.npk.n !== undefined || 
-      deviceInfo.npk.p !== undefined || 
-      deviceInfo.npk.k !== undefined
-    );
-    
-    if (deviceStatus !== 'connected') {
+    if (!isOnline) {
       return {
         status: 'offline',
         message: 'Device is offline. Check power and network connection.',
         color: 'red',
         badge: 'Offline',
-        lastUpdate: deviceInfo.connectedAt ? new Date(deviceInfo.connectedAt).toLocaleString() : 'No connection'
+        lastUpdate: 'No connection'
       };
     }
     
-    if (deviceStatus === 'connected' && !hasNPK) {
+    if (isOnline && !hasNPK) {
       return {
         status: 'sensor-issue',
         message: 'Device connected but sensor readings unavailable. Check sensor connections.',
         color: 'yellow',
         badge: 'Sensor Issue',
-        lastUpdate: deviceInfo.connectedAt ? new Date(deviceInfo.connectedAt).toLocaleString() : 'Just now'
+        lastUpdate: 'Just now'
       };
     }
     
@@ -101,7 +389,7 @@ export default function DeviceDetail() {
       message: 'All systems operational',
       color: 'green',
       badge: 'Connected',
-      lastUpdate: deviceInfo.connectedAt ? new Date(deviceInfo.connectedAt).toLocaleString() : 'Just now'
+      lastUpdate: 'Just now'
     };
   };
   
@@ -138,55 +426,7 @@ export default function DeviceDetail() {
     fetchDeviceInfo();
   }, [user, deviceId]);
   
-  // Fetch historical logs
-  useEffect(() => {
-    if (!user || !paddyInfo || !fieldInfo) return;
-    
-    const fetchLogs = async () => {
-      setIsLoadingLogs(true);
-      try {
-        const now = new Date();
-        let startDate = new Date();
-        
-        switch(timeRange) {
-          case '7d':
-            startDate.setDate(now.getDate() - 7);
-            break;
-          case '30d':
-            startDate.setDate(now.getDate() - 30);
-            break;
-          case '90d':
-            startDate.setDate(now.getDate() - 90);
-            break;
-          case 'all':
-            startDate = new Date(0);
-            break;
-        }
-        
-        const logsRef = collection(db, `users/${user.uid}/fields/${fieldInfo.id}/paddies/${paddyInfo.id}/logs`);
-        const q = timeRange === 'all' ? logsRef : query(logsRef, where('timestamp', '>=', startDate));
-        
-        const snapshot = await getDocs(q);
-        const logs: any[] = [];
-        snapshot.forEach(doc => {
-          const data = doc.data();
-          const logDate = data.timestamp?.toDate?.() || new Date(data.timestamp);
-          if (logDate >= startDate) {
-            logs.push({ ...data, id: doc.id, timestamp: logDate });
-          }
-        });
-        
-        logs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-        setHistoricalLogs(logs);
-      } catch (error) {
-        console.error('Error fetching logs:', error);
-      } finally {
-        setIsLoadingLogs(false);
-      }
-    };
-    
-    fetchLogs();
-  }, [user, paddyInfo, fieldInfo, timeRange]);
+  // Historical logs are now handled via real-time snapshot listeners above
   
   // Disconnect device handler
   const handleDisconnect = async () => {
@@ -232,6 +472,50 @@ export default function DeviceDetail() {
     }
   };
 
+  // Handle paddy name edit
+  const handleStartEditPaddyName = () => {
+    if (!paddyInfo) return;
+    setPaddyNameValue(paddyInfo.paddyName || '');
+    setIsEditingPaddyName(true);
+  };
+
+  const handleCancelEditPaddyName = () => {
+    setIsEditingPaddyName(false);
+    setPaddyNameValue('');
+  };
+
+  const handleSavePaddyName = async () => {
+    if (!user || !paddyInfo || !fieldInfo) return;
+    
+    const trimmedName = paddyNameValue.trim();
+    if (!trimmedName) {
+      alert('Paddy name cannot be empty');
+      return;
+    }
+
+    if (trimmedName === paddyInfo.paddyName) {
+      setIsEditingPaddyName(false);
+      return;
+    }
+
+    setIsSavingPaddyName(true);
+    try {
+      const paddyRef = doc(db, `users/${user.uid}/fields/${fieldInfo.id}/paddies/${paddyInfo.id}`);
+      await updateDoc(paddyRef, {
+        paddyName: trimmedName,
+      });
+
+      // Update local state
+      setPaddyInfo({ ...paddyInfo, paddyName: trimmedName });
+      setIsEditingPaddyName(false);
+    } catch (error) {
+      console.error('Error updating paddy name:', error);
+      alert('Failed to update paddy name');
+    } finally {
+      setIsSavingPaddyName(false);
+    }
+  };
+
   // Format timestamp
   const formatTimestamp = (ts: number) => {
     if (!ts) return 'Unknown';
@@ -270,7 +554,7 @@ export default function DeviceDetail() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-        <nav className="bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 shadow-lg">
+        <nav className="bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 shadow-lg sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center gap-2 text-sm">
@@ -303,42 +587,16 @@ export default function DeviceDetail() {
                 </svg>
                 <span className="font-medium text-white" style={{ fontFamily: "'Courier New', Courier, monospace" }}>{paddyInfo?.paddyName || 'Device'}</span>
               </div>
-              <div className="flex items-center gap-3">
-                {/* Notification Bell */}
-                <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    className="h-6 w-6 text-gray-600" 
-                    fill="none" 
-                    viewBox="0 0 24 24" 
-                    stroke="currentColor"
-                  >
-                    <path 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round" 
-                      strokeWidth={2} 
-                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" 
-                    />
-                  </svg>
-                </button>
-                
-                {/* Hamburger Menu */}
-                <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    className="h-6 w-6 text-gray-600" 
-                    fill="none" 
-                    viewBox="0 0 24 24" 
-                    stroke="currentColor"
-                  >
-                    <path 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round" 
-                      strokeWidth={2} 
-                      d="M4 6h16M4 12h16M4 18h16" 
-                    />
-                  </svg>
-                </button>
+              <div className="flex items-center gap-2">
+                <NotificationBell />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsMenuOpen(true)}
+                  className="hover:bg-white/20 text-white"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
               </div>
             </div>
           </div>
@@ -388,7 +646,7 @@ export default function DeviceDetail() {
                   <span className="text-lg">🧪</span>
                 </div>
                 <p className="text-xl font-bold text-gray-900">
-                  {deviceInfo?.npk?.n !== undefined ? Math.round(deviceInfo.npk.n) : '--'}
+                  {liveNPK.data?.n !== undefined ? Math.round(liveNPK.data.n) : '--'}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">mg/kg</p>
               </div>
@@ -398,7 +656,7 @@ export default function DeviceDetail() {
                   <span className="text-lg">⚗️</span>
                 </div>
                 <p className="text-xl font-bold text-gray-900">
-                  {deviceInfo?.npk?.p !== undefined ? Math.round(deviceInfo.npk.p) : '--'}
+                  {liveNPK.data?.p !== undefined ? Math.round(liveNPK.data.p) : '--'}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">mg/kg</p>
               </div>
@@ -408,7 +666,7 @@ export default function DeviceDetail() {
                   <span className="text-lg">🔬</span>
                 </div>
                 <p className="text-xl font-bold text-gray-900">
-                  {deviceInfo?.npk?.k !== undefined ? Math.round(deviceInfo.npk.k) : '--'}
+                  {liveNPK.data?.k !== undefined ? Math.round(liveNPK.data.k) : '--'}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">mg/kg</p>
               </div>
@@ -417,16 +675,28 @@ export default function DeviceDetail() {
                   <p className="text-xs font-semibold text-gray-700">Temperature</p>
                   <span className="text-lg">🌡️</span>
                 </div>
-                <p className="text-xl font-bold text-gray-900">--</p>
-                <p className="text-xs text-gray-500 mt-1">°C</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {weatherData.loading ? (
+                    <span className="inline-block w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin"></span>
+                  ) : weatherData.temperature !== null ? (
+                    Math.round(weatherData.temperature)
+                  ) : '--'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">°C {weatherData.temperature !== null && <span className="text-orange-500">(GPS)</span>}</p>
               </div>
               <div className="p-4 bg-cyan-50 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs font-semibold text-gray-700">Humidity</p>
                   <span className="text-lg">💧</span>
                 </div>
-                <p className="text-xl font-bold text-gray-900">--</p>
-                <p className="text-xs text-gray-500 mt-1">%</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {weatherData.loading ? (
+                    <span className="inline-block w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></span>
+                  ) : weatherData.humidity !== null ? (
+                    Math.round(weatherData.humidity)
+                  ) : '--'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">% {weatherData.humidity !== null && <span className="text-cyan-500">(GPS)</span>}</p>
               </div>
               <div className="p-4 bg-indigo-50 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
@@ -446,18 +716,18 @@ export default function DeviceDetail() {
               fieldId={fieldInfo.id}
               paddyId={paddyInfo.id}
               deviceId={deviceId}
-              currentNPK={deviceInfo?.npk}
+              currentNPK={liveNPK.data}
             />
           )}
 
           {/* Data Trends */}
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Data Trends</h3>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setTimeRange('7d')}
-                  className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
                     timeRange === '7d' 
                       ? 'bg-green-600 text-white' 
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -467,7 +737,7 @@ export default function DeviceDetail() {
                 </button>
                 <button
                   onClick={() => setTimeRange('30d')}
-                  className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
                     timeRange === '30d' 
                       ? 'bg-green-600 text-white' 
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -477,7 +747,7 @@ export default function DeviceDetail() {
                 </button>
                 <button
                   onClick={() => setTimeRange('90d')}
-                  className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
                     timeRange === '90d' 
                       ? 'bg-green-600 text-white' 
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -487,7 +757,7 @@ export default function DeviceDetail() {
                 </button>
                 <button
                   onClick={() => setTimeRange('all')}
-                  className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
                     timeRange === 'all' 
                       ? 'bg-green-600 text-white' 
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -497,31 +767,282 @@ export default function DeviceDetail() {
                 </button>
               </div>
             </div>
-            <div className="text-center py-8">
+            <div>
               {isLoadingLogs ? (
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center py-8">
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-3"></div>
                   <p className="text-gray-500">Loading historical data...</p>
                 </div>
-              ) : historicalLogs.length > 0 ? (
-                <div>
-                  <div className="text-5xl mb-3">📊</div>
-                  <p className="text-gray-500">Found {historicalLogs.length} readings</p>
-                  <p className="text-sm text-gray-400 mt-1">Data over the last {
-                    timeRange === '7d' ? '7 days' :
-                    timeRange === '30d' ? '30 days' :
-                    timeRange === '90d' ? '90 days' :
-                    'recording period'
-                  }</p>
-                  <p className="text-xs text-gray-400 mt-2">Chart visualization coming soon</p>
-                </div>
-              ) : (
-                <div>
-                  <div className="text-5xl mb-3">📊</div>
-                  <p className="text-gray-500">No historical data found</p>
-                  <p className="text-sm text-gray-400 mt-1">Sensor readings will be logged automatically</p>
-                </div>
-              )}
+              ) : (() => {
+                // Merge historical and real-time logs, dedupe, sort
+                const allLogs = [...historicalLogs, ...realtimeLogs];
+                const seen = new Set<string>();
+                const deduped = allLogs.filter(log => {
+                  // Use document ID if available, otherwise use a combination of timestamp, values, and source
+                  // This ensures we don't lose legitimate readings that might have similar timestamps
+                  const key = log.id 
+                    ? `${log._src || 'unknown'}-${log.id}` 
+                    : `${log._src || 'unknown'}-${log.timestamp.getTime()}-${log.nitrogen ?? ''}-${log.phosphorus ?? ''}-${log.potassium ?? ''}`;
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                });
+                const sortedLogs = deduped
+                  .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()); // Newest first
+                const chartLogs = sortedLogs
+                  .slice()
+                  .reverse()
+                  .slice(-10); // Last 10 for chart (oldest to newest)
+
+                // Pagination logic
+                const totalPages = Math.ceil(sortedLogs.length / itemsPerPage);
+                const startIndex = (currentPage - 1) * itemsPerPage;
+                const endIndex = startIndex + itemsPerPage;
+                const paginatedLogs = sortedLogs.slice(startIndex, endIndex);
+
+                return sortedLogs.length > 0 ? (
+                  <div className="space-y-6">
+                    {/* Info Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div>
+                        <p className="text-sm text-gray-600">
+                          Showing <span className="font-semibold text-gray-900">{sortedLogs.length}</span> reading{sortedLogs.length !== 1 ? 's' : ''} 
+                          {timeRange !== 'all' && (
+                            <span> over the last {
+                              timeRange === '7d' ? '7 days' :
+                              timeRange === '30d' ? '30 days' :
+                              timeRange === '90d' ? '90 days' :
+                              'recording period'
+                            }</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                          <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                          Live updates enabled
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Chart */}
+                    <div className="bg-gray-50 rounded-xl p-4">
+                      <TrendsChart 
+                        logs={chartLogs} 
+                        key={`${historicalLogs.length}-${realtimeLogs.length}-${realtimeLogs[realtimeLogs.length - 1]?.timestamp?.getTime() || 0}`} 
+                      />
+                    </div>
+
+                    {/* Data Table */}
+                    <div className="overflow-hidden">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                        <h4 className="text-md font-semibold text-gray-900">Reading History</h4>
+                        {totalPages > 1 && (
+                          <p className="text-sm text-gray-600">
+                            Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
+                            {' '}({startIndex + 1}-{Math.min(endIndex, sortedLogs.length)} of {sortedLogs.length})
+                          </p>
+                        )}
+                      </div>
+                      
+                      {/* Desktop Table */}
+                      <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full border-collapse">
+                          <thead>
+                            <tr className="bg-gray-50 border-b-2 border-gray-200">
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Timestamp</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Nitrogen (N)</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Phosphorus (P)</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Potassium (K)</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Source</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {paginatedLogs.map((log, index) => {
+                              const globalIndex = startIndex + index;
+                              return (
+                                <tr 
+                                  key={log.id || `log-${globalIndex}`} 
+                                  className={`hover:bg-gray-50 transition-colors ${
+                                    globalIndex === 0 && realtimeLogs.some(rt => rt.id === log.id) ? 'bg-green-50' : ''
+                                  }`}
+                                >
+                                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                    {log.timestamp.toLocaleString('en-US', {
+                                      year: 'numeric',
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                      second: '2-digit'
+                                    })}
+                                  </td>
+                                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-700">
+                                    {log.nitrogen !== undefined && log.nitrogen !== null ? `${Math.round(log.nitrogen)} mg/kg` : '--'}
+                                  </td>
+                                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-purple-700">
+                                    {log.phosphorus !== undefined && log.phosphorus !== null ? `${Math.round(log.phosphorus)} mg/kg` : '--'}
+                                  </td>
+                                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-orange-700">
+                                    {log.potassium !== undefined && log.potassium !== null ? `${Math.round(log.potassium)} mg/kg` : '--'}
+                                  </td>
+                                  <td className="px-4 py-3 whitespace-nowrap text-xs">
+                                    <span className={`px-2 py-1 rounded-full ${
+                                      log._src === 'rtdb' ? 'bg-green-100 text-green-800' :
+                                      log._src === 'paddy' ? 'bg-blue-100 text-blue-800' :
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {log._src === 'rtdb' ? 'Live' : log._src === 'paddy' ? 'Paddy Log' : 'Device Log'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Mobile Cards */}
+                      <div className="md:hidden space-y-3">
+                        {paginatedLogs.map((log, index) => {
+                          const globalIndex = startIndex + index;
+                          return (
+                            <div 
+                              key={log.id || `log-${globalIndex}`}
+                              className={`bg-white border rounded-lg p-4 shadow-sm ${
+                                globalIndex === 0 && realtimeLogs.some(rt => rt.id === log.id) ? 'border-green-300 bg-green-50' : 'border-gray-200'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Timestamp</p>
+                                  <p className="text-sm text-gray-900">
+                                    {log.timestamp.toLocaleString('en-US', {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                      second: '2-digit'
+                                    })}
+                                  </p>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {log.timestamp.toLocaleDateString('en-US', { year: 'numeric' })}
+                                  </p>
+                                </div>
+                                <span className={`px-2 py-1 rounded-full text-xs ${
+                                  log._src === 'rtdb' ? 'bg-green-100 text-green-800' :
+                                  log._src === 'paddy' ? 'bg-blue-100 text-blue-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {log._src === 'rtdb' ? 'Live' : log._src === 'paddy' ? 'Paddy' : 'Device'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                  <p className="text-xs font-semibold text-blue-600 mb-1">Nitrogen (N)</p>
+                                  <p className="text-lg font-bold text-blue-700">
+                                    {log.nitrogen !== undefined && log.nitrogen !== null ? Math.round(log.nitrogen) : '--'}
+                                  </p>
+                                  <p className="text-xs text-gray-500">mg/kg</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-semibold text-purple-600 mb-1">Phosphorus (P)</p>
+                                  <p className="text-lg font-bold text-purple-700">
+                                    {log.phosphorus !== undefined && log.phosphorus !== null ? Math.round(log.phosphorus) : '--'}
+                                  </p>
+                                  <p className="text-xs text-gray-500">mg/kg</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-semibold text-orange-600 mb-1">Potassium (K)</p>
+                                  <p className="text-lg font-bold text-orange-700">
+                                    {log.potassium !== undefined && log.potassium !== null ? Math.round(log.potassium) : '--'}
+                                  </p>
+                                  <p className="text-xs text-gray-500">mg/kg</p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Pagination Controls */}
+                      {totalPages > 1 && (
+                        <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                          <div className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
+                            Showing {startIndex + 1} to {Math.min(endIndex, sortedLogs.length)} of {sortedLogs.length} readings
+                          </div>
+                          <div className="flex items-center gap-1 sm:gap-2">
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={currentPage === 1}
+                              className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
+                                currentPage === 1
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              <span className="hidden sm:inline">Previous</span>
+                              <span className="sm:hidden">Prev</span>
+                            </button>
+                            
+                            {/* Page Numbers */}
+                            <div className="flex items-center gap-1">
+                              {(() => {
+                                const maxPages = 5;
+                                const pagesToShow = Math.min(maxPages, totalPages);
+                                
+                                let startPage = 1;
+                                if (totalPages > maxPages) {
+                                  if (currentPage <= 3) {
+                                    startPage = 1;
+                                  } else if (currentPage >= totalPages - 2) {
+                                    startPage = totalPages - maxPages + 1;
+                                  } else {
+                                    startPage = currentPage - 2;
+                                  }
+                                }
+                                
+                                return Array.from({ length: pagesToShow }, (_, i) => {
+                                  const pageNum = startPage + i;
+                                  return (
+                                    <button
+                                      key={pageNum}
+                                      onClick={() => setCurrentPage(pageNum)}
+                                      className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
+                                        currentPage === pageNum
+                                          ? 'bg-green-600 text-white'
+                                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                      }`}
+                                    >
+                                      {pageNum}
+                                    </button>
+                                  );
+                                });
+                              })()}
+                            </div>
+                            
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                              disabled={currentPage === totalPages}
+                              className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
+                                currentPage === totalPages
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <div className="text-5xl mb-3">📊</div>
+                    <p className="text-gray-500">No historical data found</p>
+                    <p className="text-sm text-gray-400 mt-1">Sensor readings will be logged automatically</p>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -547,9 +1068,52 @@ export default function DeviceDetail() {
               </div>
               {paddyInfo && (
                 <>
-                  <div className="flex justify-between py-2 border-b border-gray-100">
-                    <span className="text-gray-600">Paddy Name</span>
-                    <span className="font-medium text-gray-900">{paddyInfo.paddyName}</span>
+                  <div className="py-2 border-b border-gray-100">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-gray-600">Paddy Name</span>
+                      {!isEditingPaddyName && (
+                        <button
+                          onClick={handleStartEditPaddyName}
+                          className="text-green-600 hover:text-green-700 text-xs font-medium"
+                          title="Edit paddy name"
+                        >
+                          ✏️ Edit
+                        </button>
+                      )}
+                    </div>
+                    {isEditingPaddyName ? (
+                      <div className="space-y-2 mt-2">
+                        <Input
+                          type="text"
+                          value={paddyNameValue}
+                          onChange={(e) => setPaddyNameValue(e.target.value)}
+                          className="w-full"
+                          placeholder="Enter paddy name"
+                          disabled={isSavingPaddyName}
+                          autoFocus
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={handleSavePaddyName}
+                            disabled={isSavingPaddyName || !paddyNameValue.trim()}
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                          >
+                            {isSavingPaddyName ? 'Saving...' : 'Save'}
+                          </Button>
+                          <Button
+                            onClick={handleCancelEditPaddyName}
+                            disabled={isSavingPaddyName}
+                            size="sm"
+                            variant="outline"
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="font-medium text-gray-900">{paddyInfo.paddyName}</span>
+                    )}
                   </div>
                   {paddyInfo.description && (
                     <div className="flex justify-between py-2 border-b border-gray-100">
@@ -744,6 +1308,226 @@ export default function DeviceDetail() {
             </div>
           </>
         )}
+
+        {/* Sidebar Menu */}
+        <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+          <SheetContent side="right" className="w-80 sm:w-96 bg-gradient-to-br from-green-50 via-white to-emerald-50 border-l border-green-200/50 p-0 flex flex-col">
+            <SheetHeader className="px-6 pt-6 pb-4 border-b border-green-200/50">
+              <SheetTitle className="text-2xl font-bold text-gray-900" style={{ fontFamily: "'Courier New', Courier, monospace" }}>
+                PadBuddy
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 flex flex-col min-h-0 px-6 py-4">
+              {/* User Profile */}
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-green-200/50">
+                {user?.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || user.email || "User"}
+                    className="w-12 h-12 rounded-full object-cover ring-2 ring-primary/20 shadow-md"
+                  />
+                ) : (
+                  <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center ring-2 ring-primary/20 shadow-md">
+                    <span className="text-primary-foreground font-semibold text-lg">
+                      {user?.displayName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate text-gray-800">
+                    {user?.displayName || user?.email?.split('@')[0] || 'User'}
+                  </p>
+                  <p className="text-xs text-gray-600">Rice Farmer</p>
+                </div>
+              </div>
+
+              {/* Menu Items */}
+              <nav className="flex-1 py-4 space-y-2 overflow-y-auto min-h-0">
+                <Button
+                  variant={pathname === '/' ? "default" : "ghost"}
+                  className={`w-full justify-start transition-all duration-200 relative ${
+                    pathname === '/' 
+                      ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
+                      : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
+                  }`}
+                  onClick={() => {
+                    router.push('/');
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
+                    pathname === '/' ? 'bg-white' : 'bg-transparent'
+                  }`} />
+                  <HomeIcon className={`mr-3 h-5 w-5 transition-transform duration-200 ${
+                    pathname === '/' ? 'scale-110' : 'group-hover:scale-110'
+                  }`} />
+                  <span className="font-medium">My Fields</span>
+                </Button>
+                <Button
+                  variant={pathname === '/varieties' ? "default" : "ghost"}
+                  className={`w-full justify-start transition-all duration-200 relative ${
+                    pathname === '/varieties' 
+                      ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
+                      : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
+                  }`}
+                  onClick={() => {
+                    router.push('/varieties');
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
+                    pathname === '/varieties' ? 'bg-white' : 'bg-transparent'
+                  }`} />
+                  <BookOpen className={`mr-3 h-5 w-5 transition-transform duration-200 ${
+                    pathname === '/varieties' ? 'scale-110' : 'group-hover:scale-110'
+                  }`} />
+                  <span className="font-medium">Rice Varieties</span>
+                </Button>
+                {visibility.helpPageVisible && (
+                  <Button
+                    variant={pathname === '/help' ? "default" : "ghost"}
+                    className={`w-full justify-start transition-all duration-200 relative ${
+                      pathname === '/help' 
+                        ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
+                        : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
+                    }`}
+                    onClick={() => {
+                      router.push('/help');
+                      setIsMenuOpen(false);
+                    }}
+                  >
+                    <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
+                      pathname === '/help' ? 'bg-white' : 'bg-transparent'
+                    }`} />
+                    <HelpCircle className={`mr-3 h-5 w-5 transition-transform duration-200 ${
+                      pathname === '/help' ? 'scale-110' : 'group-hover:scale-110'
+                    }`} />
+                    <span className="font-medium">Help & Support</span>
+                  </Button>
+                )}
+                {visibility.aboutPageVisible && (
+                  <Button
+                    variant={pathname === '/about' ? "default" : "ghost"}
+                    className={`w-full justify-start transition-all duration-200 relative ${
+                      pathname === '/about' 
+                        ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-md hover:from-green-700 hover:to-emerald-700' 
+                        : 'hover:bg-white/60 hover:text-gray-900 text-gray-700'
+                    }`}
+                    onClick={() => {
+                      router.push('/about');
+                      setIsMenuOpen(false);
+                    }}
+                  >
+                    <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full transition-all duration-200 ${
+                      pathname === '/about' ? 'bg-white' : 'bg-transparent'
+                    }`} />
+                    <Info className={`mr-3 h-5 w-5 transition-transform duration-200 ${
+                      pathname === '/about' ? 'scale-110' : 'group-hover:scale-110'
+                    }`} />
+                    <span className="font-medium">About PadBuddy</span>
+                  </Button>
+                )}
+
+                {/* Admin Panel - Only visible to admin */}
+                {user?.email === ADMIN_EMAIL && (
+                  <>
+                    <div className="border-t border-gray-200 my-3"></div>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start transition-all duration-200 relative bg-purple-50 hover:bg-purple-100 text-purple-700"
+                      onClick={() => {
+                        router.push('/admin');
+                        setIsMenuOpen(false);
+                      }}
+                    >
+                      <Shield className="mr-3 h-5 w-5" />
+                      <span className="font-medium">Admin Panel</span>
+                    </Button>
+                  </>
+                )}
+              </nav>
+
+              {/* Sign Out */}
+              <div className="pt-4 border-t border-green-200/50 flex-shrink-0">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="w-full bg-gradient-to-b from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium py-3 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg active:scale-[0.98]"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsLogoutModalOpen(true);
+                  }}
+                >
+                  <LogOut className="mr-2 h-5 w-5" />
+                  Sign Out
+                </Button>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        {/* Logout Confirmation Modal */}
+        <Dialog open={isLogoutModalOpen} onOpenChange={setIsLogoutModalOpen}>
+          <DialogContent className="sm:max-w-md rounded-2xl border-0 shadow-2xl bg-white animate-fade-in">
+            <DialogHeader className="text-center pb-4">
+              <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center shadow-md">
+                <LogOut className="h-8 w-8 text-red-600" />
+              </div>
+              <DialogTitle className="text-2xl font-bold text-gray-900">
+                Sign Out?
+              </DialogTitle>
+              <DialogDescription className="text-base text-gray-600 pt-2 px-2">
+                Are you sure you want to sign out? You'll need to sign in again to access your fields.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-row gap-3 pt-4 pb-2">
+              <Button
+                variant="ghost"
+                onClick={() => setIsLogoutModalOpen(false)}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 font-medium py-3 rounded-xl transition-all active:scale-[0.98] border-0"
+                disabled={isLoggingOut}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={async () => {
+                  setIsLoggingOut(true);
+                  try {
+                    setIsMenuOpen(false);
+                    setIsLogoutModalOpen(false);
+                    await signOut();
+                    router.push('/auth');
+                  } catch (error) {
+                    console.error('Sign out error:', error);
+                    setIsLoggingOut(false);
+                    setIsLogoutModalOpen(false);
+                    alert('Failed to sign out. Please try again.');
+                  }
+                }}
+                disabled={isLoggingOut}
+                className="flex-1 bg-gradient-to-b from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium py-3 rounded-xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 active:scale-[0.98]"
+              >
+                {isLoggingOut ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Signing out...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <LogOut className="h-4 w-4" />
+                    Sign Out
+                  </span>
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </ProtectedRoute>
   );
@@ -925,6 +1709,79 @@ function DeviceStatistics({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Trends Chart Component
+function TrendsChart({ logs }: { logs: Array<{ timestamp: Date; nitrogen?: number; phosphorus?: number; potassium?: number }> }) {
+  const { useMemo } = require('react');
+  
+  const data = useMemo(() => {
+    // Ensure chronological order (oldest → newest)
+    const ordered = [...logs].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const labels = ordered.map((l) => l.timestamp.toLocaleString(undefined, { 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }));
+
+    return {
+    labels,
+    datasets: [
+      {
+        label: 'Nitrogen (mg/kg)',
+        data: ordered.map((l) => l.nitrogen ?? null),
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37, 99, 235, 0.2)',
+        tension: 0.3,
+        spanGaps: true,
+      },
+      {
+        label: 'Phosphorus (mg/kg)',
+        data: ordered.map((l) => l.phosphorus ?? null),
+        borderColor: '#7c3aed',
+        backgroundColor: 'rgba(124, 58, 237, 0.2)',
+        tension: 0.3,
+        spanGaps: true,
+      },
+      {
+        label: 'Potassium (mg/kg)',
+        data: ordered.map((l) => l.potassium ?? null),
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.2)',
+        tension: 0.3,
+        spanGaps: true,
+      },
+    ],
+    };
+  }, [logs]);
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: {
+      duration: 750,
+    },
+    plugins: {
+      legend: { position: 'top' as const },
+      tooltip: { mode: 'index' as const, intersect: false },
+    },
+    scales: {
+      y: { beginAtZero: true, title: { display: true, text: 'mg/kg' } },
+      x: {
+        ticks: {
+          maxRotation: 45,
+          minRotation: 45
+        }
+      }
+    },
+  };
+
+  return (
+    <div style={{ height: 320 }}>
+      <Line data={data} options={options} />
     </div>
   );
 }

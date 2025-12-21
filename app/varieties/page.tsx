@@ -627,6 +627,56 @@ export default function RiceVarietiesPage() {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Mobile Bottom Navigation */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50 md:hidden safe-area-bottom">
+          <div className="flex justify-around items-center h-16 px-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`flex flex-col items-center gap-1 h-auto py-2 px-3 ${
+                pathname === '/' ? 'text-green-600' : 'text-gray-600 hover:text-green-600'
+              }`}
+              onClick={() => router.push('/')}
+            >
+              <HomeIcon className="h-5 w-5" />
+              <span className="text-xs font-medium">Home</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`flex flex-col items-center gap-1 h-auto py-2 px-3 ${
+                pathname === '/varieties' ? 'text-green-600' : 'text-gray-600 hover:text-green-600'
+              }`}
+              onClick={() => router.push('/varieties')}
+            >
+              <BookOpen className="h-5 w-5" />
+              <span className="text-xs font-medium">Varieties</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`flex flex-col items-center gap-1 h-auto py-2 px-3 ${
+                pathname === '/help' ? 'text-green-600' : 'text-gray-600 hover:text-green-600'
+              }`}
+              onClick={() => router.push('/help')}
+            >
+              <HelpCircle className="h-5 w-5" />
+              <span className="text-xs font-medium">Help</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`flex flex-col items-center gap-1 h-auto py-2 px-3 ${
+                pathname === '/about' ? 'text-green-600' : 'text-gray-600 hover:text-green-600'
+              }`}
+              onClick={() => router.push('/about')}
+            >
+              <Info className="h-5 w-5" />
+              <span className="text-xs font-medium">About</span>
+            </Button>
+          </div>
+        </div>
       </div>
     </ProtectedRoute>
   );

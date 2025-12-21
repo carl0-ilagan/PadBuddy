@@ -3,11 +3,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useNotifications } from '@/context/NotificationContext';
+import { usePushNotifications } from '@/lib/hooks/usePushNotifications';
 
 export default function NotificationBell() {
   const router = useRouter();
   const { notifications, unreadCount, markAsRead, markAllAsRead, loading } = useNotifications();
+  const { isSupported, permission, requestPermission } = usePushNotifications();
   const [isOpen, setIsOpen] = useState(false);
+  const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -66,6 +69,20 @@ export default function NotificationBell() {
     return date.toLocaleDateString();
   };
 
+  const handleEnablePushNotifications = async () => {
+    setIsRequestingPermission(true);
+    try {
+      const success = await requestPermission();
+      if (success) {
+        localStorage.setItem('notification-permission-requested', 'true');
+      }
+    } catch (error) {
+      console.error('Error enabling push notifications:', error);
+    } finally {
+      setIsRequestingPermission(false);
+    }
+  };
+
   return (
     <div className="relative" ref={dropdownRef}>
       {/* Bell Icon Button */}
@@ -105,15 +122,35 @@ export default function NotificationBell() {
         }`}
       >
           {/* Header */}
-          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900">Notifications</h3>
-            {unreadCount > 0 && (
-              <button
-                onClick={markAllAsRead}
-                className="text-xs text-green-600 hover:text-green-700 font-medium"
-              >
-                Mark all read
-              </button>
+          <div className="p-4 border-b border-gray-200">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-semibold text-gray-900">Notifications</h3>
+              {unreadCount > 0 && (
+                <button
+                  onClick={markAllAsRead}
+                  className="text-xs text-green-600 hover:text-green-700 font-medium"
+                >
+                  Mark all read
+                </button>
+              )}
+            </div>
+            {/* Push Notification Status */}
+            {isSupported && permission !== 'granted' && (
+              <div className="mt-2 p-2 bg-blue-50 rounded-lg">
+                <p className="text-xs text-gray-600 mb-1">Enable push notifications to get alerts even when the app is closed</p>
+                <button
+                  onClick={handleEnablePushNotifications}
+                  disabled={isRequestingPermission}
+                  className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRequestingPermission ? 'Enabling...' : permission === 'denied' ? 'Enable in Browser Settings' : 'Enable Push Notifications'}
+                </button>
+              </div>
+            )}
+            {isSupported && permission === 'granted' && (
+              <div className="mt-2 p-2 bg-green-50 rounded-lg">
+                <p className="text-xs text-green-700">✓ Push notifications enabled</p>
+              </div>
             )}
           </div>
 

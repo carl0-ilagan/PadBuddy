@@ -76,23 +76,12 @@ export async function logSensorReadingsLegacy(
 }
 
 /**
- * Check if we should log new readings (rate limiting)
- * Prevents excessive logging - only log once per hour for each device
+ * Auto-log readings every update.
+ * Logs when any of n/p/k changes.
+ * Simple dedup: skip if same values logged within 1 second.
  */
-export function shouldLogReadings(lastLogTime: number | null): boolean {
-  if (!lastLogTime) return true;
-  
-  const ONE_HOUR = 60 * 60 * 1000;
-  const timeSinceLastLog = Date.now() - lastLogTime;
-  
-  return timeSinceLastLog >= ONE_HOUR;
-}
-
-/**
- * Auto-log readings with rate limiting
- * Tracks last log time in memory to prevent duplicate logs
- */
-const lastLogTimes = new Map<string, number>();
+type LastLog = { n?: number; p?: number; k?: number; lastLogTime: number };
+const lastLogs = new Map<string, LastLog>();
 
 export async function autoLogReadings(
   userId: string,
@@ -101,10 +90,14 @@ export async function autoLogReadings(
   npk: DeviceNPK
 ): Promise<void> {
   const key = `${userId}_${fieldId}_${paddyId}`;
-  const lastLog = lastLogTimes.get(key) || null;
-  
-  if (shouldLogReadings(lastLog)) {
-    await logSensorReadings(userId, fieldId, paddyId, npk);
-    lastLogTimes.set(key, Date.now());
+  const last = lastLogs.get(key);
+  const now = Date.now();
+
+  // Skip if same values logged within 1 second
+  if (last && last.n === npk?.n && last.p === npk?.p && last.k === npk?.k && (now - last.lastLogTime) < 1000) {
+    return;
   }
+
+  await logSensorReadings(userId, fieldId, paddyId, npk);
+  lastLogs.set(key, { n: npk?.n, p: npk?.p, k: npk?.k, lastLogTime: now });
 }

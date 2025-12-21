@@ -75,7 +75,27 @@ export async function getDeviceData(deviceId: string): Promise<DeviceData | null
       return null;
     }
     
-    return snapshot.val() as DeviceData;
+    const raw = snapshot.val() as DeviceData & { readings?: any; sensors?: any };
+
+    const normalizeNpk = (data: any): DeviceNPK | undefined => {
+      const source = data?.npk || data?.readings || data?.sensors || data;
+      if (!source) return undefined;
+
+      const n = source.n ?? source.nitrogen ?? source.N ?? null;
+      const p = source.p ?? source.phosphorus ?? source.P ?? null;
+      const k = source.k ?? source.potassium ?? source.K ?? null;
+      const timestamp = source.timestamp ?? source.lastUpdate ?? source.ts ?? null;
+
+      if (n === null && p === null && k === null) return undefined;
+      return { n: n ?? undefined, p: p ?? undefined, k: k ?? undefined, timestamp: timestamp ?? undefined };
+    };
+
+    const npk = normalizeNpk(raw);
+
+    return {
+      ...raw,
+      npk,
+    } as DeviceData;
   } catch (error) {
     console.error(`Error fetching device data for ${deviceId}:`, error);
     return null;
@@ -83,24 +103,65 @@ export async function getDeviceData(deviceId: string): Promise<DeviceData | null
 }
 
 /**
- * Check if device is connected (based on status and connectedAt)
+ * Check if device is connected (based on multiple strategies)
  */
 export async function checkDeviceHeartbeat(deviceId: string): Promise<DeviceHeartbeat> {
   try {
     const deviceData = await getDeviceData(deviceId);
     
-    if (!deviceData || !deviceData.connectedAt) {
+    if (!deviceData) {
       return { isAlive: false, lastSeen: null, minutesAgo: null };
     }
     
-    const connectedAt = new Date(deviceData.connectedAt).getTime();
-    const now = Date.now();
-    const minutesAgo = Math.floor((now - connectedAt) / 60000);
+    let isAlive = false;
+    let lastSeen: string | null = null;
+    let minutesAgo: number | null = null;
     
-    // Consider device alive if status is "connected" and connected within last 5 minutes
-    const isAlive = deviceData.status === 'connected' && minutesAgo < 5;
+    // Strategy 1: Check device-level status field
+    if (deviceData.status === 'connected') {
+      isAlive = true;
+    }
     
-    return { isAlive, lastSeen: deviceData.connectedAt, minutesAgo };
+    // Strategy 2: Check connectedAt timestamp (if exists)
+    if (deviceData.connectedAt) {
+      try {
+        const connectedAt = new Date(deviceData.connectedAt).getTime();
+        const now = Date.now();
+        minutesAgo = Math.floor((now - connectedAt) / 60000);
+        lastSeen = deviceData.connectedAt;
+        
+        // If status isn't set, check if connected within last 10 minutes
+        if (!isAlive && minutesAgo < 10) {
+          isAlive = true;
+        }
+      } catch (e) {
+        // Invalid date format
+      }
+    }
+    
+    // Strategy 3: If NPK data exists with small timestamp (relative counter from ESP32), device is online
+    if (!isAlive && deviceData.npk && deviceData.npk.timestamp !== undefined && deviceData.npk.timestamp < 10000) {
+      isAlive = true;
+      lastSeen = lastSeen || 'Just now';
+      minutesAgo = 0;
+    }
+    
+    // Strategy 4: Check NPK timestamp if it's a proper Unix timestamp
+    if (!isAlive && deviceData.npk && deviceData.npk.timestamp && deviceData.npk.timestamp > 1e9) {
+      const timestamp = deviceData.npk.timestamp < 1e11 
+        ? deviceData.npk.timestamp * 1000 
+        : deviceData.npk.timestamp;
+      const now = Date.now();
+      const age = now - timestamp;
+      const minutes = Math.floor(age / 60000);
+      
+      if (minutes < 10) {
+        isAlive = true;
+        minutesAgo = minutes;
+      }
+    }
+    
+    return { isAlive, lastSeen, minutesAgo };
   } catch (error) {
     console.error(`Error checking heartbeat for ${deviceId}:`, error);
     return { isAlive: false, lastSeen: null, minutesAgo: null };

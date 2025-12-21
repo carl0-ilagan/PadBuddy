@@ -3,6 +3,7 @@ import { getAnalytics, Analytics } from "firebase/analytics";
 import { getAuth, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
+import { getMessaging, getToken, onMessage, Messaging } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -37,4 +38,14 @@ if (typeof window !== "undefined") {
   analytics = getAnalytics(app);
 }
 
-export { app, auth, db, database, analytics };
+// Messaging (FCM) is only available in the browser
+let messaging: Messaging | null = null;
+if (typeof window !== "undefined" && 'serviceWorker' in navigator) {
+  try {
+    messaging = getMessaging(app);
+  } catch (error) {
+    console.warn('Firebase Messaging initialization failed:', error);
+  }
+}
+
+export { app, auth, db, database, analytics, messaging };

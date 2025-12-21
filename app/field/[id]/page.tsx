@@ -1,11 +1,27 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, getDocs, updateDoc, setDoc, query, where, orderBy } from 'firebase/firestore';
+import { db, database } from '@/lib/firebase';
+import { doc, getDoc, collection, getDocs, updateDoc, setDoc, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { ref, onValue } from 'firebase/database';
+import {
+  Chart as ChartJS,
+  LineElement,
+  PointElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
+
+// Register Chart.js components
+ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
 import ProtectedRoute from '@/components/ProtectedRoute';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { getVarietyByName } from '@/lib/utils/varietyHelpers';
 import { getCurrentStage, getDaysSincePlanting, getExpectedHarvestDate, getGrowthProgress } from '@/lib/utils/stageCalculator';
 import { ACTIVITIES } from '@/lib/data/activities';
@@ -161,61 +177,68 @@ export default function FieldDetail() {
   }, [user, fieldId]);
 
   // Fetch device readings from RTDB and auto-log
-  useEffect(() => {
-    const fetchDeviceReadings = async () => {
-      if (!user || paddies.length === 0) return;
+  const fetchDeviceReadings = useCallback(async () => {
+    if (!user || paddies.length === 0) return;
 
-      try {
-        const { database } = await import('@/lib/firebase');
-        const { ref, get } = await import('firebase/database');
-        const { getDeviceData } = await import('@/lib/utils/deviceStatus');
-        const { autoLogReadings } = await import('@/lib/utils/sensorLogging');
+    try {
+      const { database } = await import('@/lib/firebase');
+      const { ref, get } = await import('firebase/database');
+      const { getDeviceData } = await import('@/lib/utils/deviceStatus');
+      const { autoLogReadings } = await import('@/lib/utils/sensorLogging');
 
-        const readings: any[] = [];
+      const readings: any[] = [];
+      
+      for (const paddy of paddies) {
+        if (!paddy.deviceId) continue;
         
-        for (const paddy of paddies) {
-          if (!paddy.deviceId) continue;
+        try {
+          const deviceData = await getDeviceData(paddy.deviceId);
+          console.log(`[Device Fetch] ${paddy.deviceId}:`, deviceData);
           
-          try {
-            const deviceData = await getDeviceData(paddy.deviceId);
-            console.log(`[Device Fetch] ${paddy.deviceId}:`, deviceData);
-            
-            if (deviceData) {
-              readings.push({
-                deviceId: paddy.deviceId,
-                paddyId: paddy.id,
-                ...deviceData,
-              });
+          if (deviceData) {
+            readings.push({
+              deviceId: paddy.deviceId,
+              paddyId: paddy.id,
+              ...deviceData,
+            });
 
-              // Auto-log NPK readings if available
-              if (deviceData.npk && (deviceData.npk.n !== undefined || deviceData.npk.p !== undefined || deviceData.npk.k !== undefined)) {
-                console.log(`[Auto-Log] Logging NPK for ${paddy.deviceId}:`, deviceData.npk);
-                await autoLogReadings(user.uid, fieldId, paddy.id, deviceData.npk);
-              } else {
-                console.log(`[Auto-Log] No NPK data for ${paddy.deviceId}`);
-              }
+            // Auto-log NPK readings if available
+            if (deviceData.npk && (deviceData.npk.n !== undefined || deviceData.npk.p !== undefined || deviceData.npk.k !== undefined)) {
+              console.log(`[Auto-Log] Logging NPK for ${paddy.deviceId}:`, deviceData.npk);
+              await autoLogReadings(user.uid, fieldId, paddy.id, deviceData.npk);
             } else {
-              console.log(`[Device Fetch] No data found for ${paddy.deviceId}`);
+              console.log(`[Auto-Log] No NPK data for ${paddy.deviceId}`);
             }
-          } catch (error) {
-            console.error(`Error fetching device ${paddy.deviceId}:`, error);
+          } else {
+            console.log(`[Device Fetch] No data found for ${paddy.deviceId}`);
           }
+        } catch (error) {
+          console.error(`Error fetching device ${paddy.deviceId}:`, error);
         }
-        
-        console.log('[Device Fetch] All readings:', readings);
-        setDeviceReadings(readings);
-      } catch (error) {
-        console.error('Error fetching device readings:', error);
       }
-    };
+      
+      console.log('[Device Fetch] All readings:', readings);
+      setDeviceReadings(readings);
+    } catch (error) {
+      console.error('Error fetching device readings:', error);
+    }
+  }, [user, fieldId, paddies]);
 
+  useEffect(() => {
     fetchDeviceReadings();
     
-    // Refresh device readings every 5 minutes
-    const interval = setInterval(fetchDeviceReadings, 5 * 60 * 1000);
+    // Refresh device readings every 30 seconds
+    const interval = setInterval(fetchDeviceReadings, 30 * 1000);
     
     return () => clearInterval(interval);
-  }, [user, fieldId, paddies]);
+  }, [fetchDeviceReadings]);
+
+  // Refresh device readings when statistics tab becomes active
+  useEffect(() => {
+    if (activeTab === 'statistics' && paddies.length > 0) {
+      fetchDeviceReadings();
+    }
+  }, [activeTab, paddies.length, fetchDeviceReadings]);
   
   // Handle add device submission
   const handleAddDevice = async (e: React.FormEvent) => {
@@ -517,7 +540,12 @@ export default function FieldDetail() {
                 : 'opacity-0 translate-y-4 absolute inset-0 pointer-events-none'
             }`}>
               {activeTab === 'statistics' && hasDevices && (
-                <StatisticsTab paddies={paddies} deviceReadings={deviceReadings} fieldId={fieldId} />
+                <StatisticsTab 
+                  paddies={paddies} 
+                  deviceReadings={deviceReadings} 
+                  fieldId={fieldId}
+                  key={`stats-${paddies.length}-${deviceReadings.length}`}
+                />
               )}
             </div>
 
@@ -1250,13 +1278,17 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
   const { user } = useAuth();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('7d');
   const [historicalLogs, setHistoricalLogs] = useState<any[]>([]);
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [realtimeLogs, setRealtimeLogs] = useState<any[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(true); // Start with true to show loading
   const [isLogging, setIsLogging] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [fieldStats, setFieldStats] = useState<{
     nitrogen: { current: number | null; average: number | null; min: number | null; max: number | null };
     phosphorus: { current: number | null; average: number | null; min: number | null; max: number | null };
     potassium: { current: number | null; average: number | null; min: number | null; max: number | null };
   } | null>(null);
+  const [hasInitialized, setHasInitialized] = useState(false);
   
   // Calculate field-level statistics from current device readings AND historical logs
   useEffect(() => {
@@ -1369,81 +1401,150 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
     }
   };
   
-  // Fetch historical logs based on time range
+  // Reset to page 1 when time range changes
   useEffect(() => {
-    if (!user || paddies.length === 0) return;
+    setCurrentPage(1);
+  }, [timeRange]);
+
+  // Real-time RTDB listeners for all devices
+  useEffect(() => {
+    if (!paddies.length) return;
+
+    const unsubscribers: (() => void)[] = [];
+
+    paddies.forEach((paddy) => {
+      if (!paddy.deviceId) return;
+
+      const npkRef = ref(database, `devices/${paddy.deviceId}/npk`);
+      const unsubscribe = onValue(npkRef, (snapshot) => {
+        if (!snapshot.exists()) return;
+        
+        const data = snapshot.val();
+        const timestamp = data.timestamp && data.timestamp > 1700000000000 
+          ? new Date(data.timestamp) 
+          : new Date();
+        
+        if (data.n !== undefined || data.p !== undefined || data.k !== undefined) {
+          const newLog = {
+            id: `rtdb-${paddy.deviceId}-${Date.now()}`,
+            timestamp,
+            nitrogen: data.n,
+            phosphorus: data.p,
+            potassium: data.k,
+            paddyId: paddy.id,
+            paddyName: paddy.paddyName,
+            deviceId: paddy.deviceId,
+            _src: 'rtdb'
+          };
+          
+          setRealtimeLogs(prev => {
+            // Remove old logs from same device and add new one
+            const filtered = prev.filter(log => log.deviceId !== paddy.deviceId || log._src !== 'rtdb');
+            return [...filtered, newLog].slice(-20); // Keep last 20 real-time entries
+          });
+        }
+      });
+
+      unsubscribers.push(unsubscribe);
+    });
+
+    return () => {
+      unsubscribers.forEach(unsub => unsub());
+    };
+  }, [paddies]);
+
+  // Initial data fetch when component mounts or paddies become available
+  useEffect(() => {
+    if (!user || paddies.length === 0) {
+      setIsLoadingLogs(false);
+      return;
+    }
     
-    const fetchLogs = async () => {
-      setIsLoadingLogs(true);
-      try {
-        const now = new Date();
-        let startDate = new Date();
-        let days = 7;
-        
-        switch(timeRange) {
-          case '7d':
-            startDate.setDate(now.getDate() - 7);
-            days = 7;
-            break;
-          case '30d':
-            startDate.setDate(now.getDate() - 30);
-            days = 30;
-            break;
-          case '90d':
-            startDate.setDate(now.getDate() - 90);
-            days = 90;
-            break;
-          case 'all':
-            startDate = new Date(0); // Beginning of time
-            days = 9999;
-            break;
-        }
-        
-        // Fetch logs for all paddies
-        const allLogs: any[] = [];
-        for (const paddy of paddies) {
-          try {
-            const logsRef = collection(db, `users/${user.uid}/fields/${fieldId}/paddies/${paddy.id}/logs`);
-            
-            // For 'all' time range, fetch all logs without filter to avoid index requirement
-            const q = timeRange === 'all' 
-              ? logsRef 
-              : query(logsRef, where('timestamp', '>=', startDate));
-            
-            const snapshot = await getDocs(q);
-            snapshot.forEach(doc => {
-              const data = doc.data();
-              // Filter by timestamp in JavaScript if needed
-              const logDate = data.timestamp?.toDate?.() || new Date(data.timestamp);
-              if (logDate >= startDate) {
-                allLogs.push({ 
-                  ...data, 
-                  id: doc.id, 
-                  paddyId: paddy.id, 
-                  paddyName: paddy.paddyName,
-                  timestamp: logDate 
-                });
-              }
-            });
-          } catch (error: any) {
-            console.error(`Error fetching logs for paddy ${paddy.id}:`, error);
-            console.error('Error code:', error?.code);
-            console.error('Error message:', error?.message);
-          }
-        }
-        
-        // Sort in JavaScript instead of Firestore query
-        allLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-        
-        setHistoricalLogs(allLogs);
-      } catch (error) {
-        console.error('Error fetching logs:', error);
-      } finally {
+    // Mark as initialized once we have the required data
+    if (!hasInitialized && paddies.length > 0) {
+      setHasInitialized(true);
+    }
+  }, [user, paddies, hasInitialized]);
+
+  // Real-time Firestore listeners for historical logs
+  useEffect(() => {
+    if (!user || paddies.length === 0) {
+      setIsLoadingLogs(false);
+      return;
+    }
+    
+    setIsLoadingLogs(true);
+
+    const now = new Date();
+    let startDate = new Date();
+    switch (timeRange) {
+      case '7d': startDate.setDate(now.getDate() - 7); break;
+      case '30d': startDate.setDate(now.getDate() - 30); break;
+      case '90d': startDate.setDate(now.getDate() - 90); break;
+      case 'all': startDate = new Date(0); break;
+    }
+
+    const unsubscribers: (() => void)[] = [];
+    let latestLogs: any[] = [];
+    let initializedCount = 0;
+    const totalPaddies = paddies.length;
+
+    const mergeAndSet = (isInitial = false) => {
+      if (isInitial) {
+        initializedCount++;
+      }
+      const sorted = latestLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      setHistoricalLogs(sorted);
+      // Only set loading to false after all paddies have initialized
+      if (initializedCount >= totalPaddies || !isInitial) {
         setIsLoadingLogs(false);
       }
     };
-    
-    fetchLogs();
+
+    paddies.forEach((paddy) => {
+      const logsRef = collection(db, `users/${user.uid}/fields/${fieldId}/paddies/${paddy.id}/logs`);
+      const q = timeRange === 'all' ? logsRef : query(logsRef, where('timestamp', '>=', startDate));
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const arr: any[] = [];
+        snapshot.forEach((doc) => {
+          const data: any = doc.data();
+          const logDate = data.timestamp?.toDate?.() || new Date(data.timestamp);
+          if (logDate >= startDate) {
+            arr.push({ 
+              ...data, 
+              id: doc.id, 
+              paddyId: paddy.id, 
+              paddyName: paddy.paddyName,
+              timestamp: logDate,
+              _src: 'paddy'
+            });
+          }
+        });
+        
+        // Update logs for this paddy
+        latestLogs = latestLogs.filter(log => log.paddyId !== paddy.id || log._src !== 'paddy');
+        latestLogs = [...latestLogs, ...arr];
+        
+        // Check if this is the first snapshot (initial load)
+        const isInitial = initializedCount < totalPaddies;
+        mergeAndSet(isInitial);
+      }, (err) => {
+        console.error(`Paddy logs listener error for ${paddy.id}:`, err);
+        initializedCount++;
+        if (initializedCount >= totalPaddies) {
+          setIsLoadingLogs(false);
+        }
+      });
+
+      unsubscribers.push(unsubscribe);
+    });
+
+    return () => {
+      unsubscribers.forEach(unsub => {
+        try { unsub(); } catch {}
+      });
+    };
   }, [user, fieldId, paddies, timeRange]);
   
   return (
@@ -1488,12 +1589,12 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             <span className="text-xl">🧪</span>
           </div>
           <p className="text-xl font-bold text-gray-900">
-            {fieldStats?.nitrogen.current !== null && fieldStats?.nitrogen.current !== undefined
+            {fieldStats && fieldStats.nitrogen.current !== null && fieldStats.nitrogen.current !== undefined
               ? Math.round(fieldStats.nitrogen.current)
               : '--'}
           </p>
           <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-          {fieldStats?.nitrogen.average !== null && (
+          {fieldStats && fieldStats.nitrogen.average !== null && (
             <p className="text-xs text-gray-400 mt-1">Avg: {Math.round(fieldStats.nitrogen.average)}</p>
           )}
         </div>
@@ -1505,12 +1606,12 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             <span className="text-xl">⚗️</span>
           </div>
           <p className="text-xl font-bold text-gray-900">
-            {fieldStats?.phosphorus.current !== null && fieldStats?.phosphorus.current !== undefined
+            {fieldStats && fieldStats.phosphorus.current !== null && fieldStats.phosphorus.current !== undefined
               ? Math.round(fieldStats.phosphorus.current)
               : '--'}
           </p>
           <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-          {fieldStats?.phosphorus.average !== null && (
+          {fieldStats && fieldStats.phosphorus.average !== null && (
             <p className="text-xs text-gray-400 mt-1">Avg: {Math.round(fieldStats.phosphorus.average)}</p>
           )}
         </div>
@@ -1522,12 +1623,12 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             <span className="text-xl">🔬</span>
           </div>
           <p className="text-xl font-bold text-gray-900">
-            {fieldStats?.potassium.current !== null && fieldStats?.potassium.current !== undefined
+            {fieldStats && fieldStats.potassium.current !== null && fieldStats.potassium.current !== undefined
               ? Math.round(fieldStats.potassium.current)
               : '--'}
           </p>
           <p className="text-xs text-gray-500 mt-1">mg/kg</p>
-          {fieldStats?.potassium.average !== null && (
+          {fieldStats && fieldStats.potassium.average !== null && (
             <p className="text-xs text-gray-400 mt-1">Avg: {Math.round(fieldStats.potassium.average)}</p>
           )}
         </div>
@@ -1563,18 +1664,18 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
         </div>
       </div>
 
-      {/* Data Visualization Placeholder */}
+      {/* Data Trends */}
       <div className="bg-white rounded-xl shadow-md p-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <div>
             <h2 className="text-lg font-bold text-gray-900">Data Trends</h2>
             <p className="text-xs text-gray-500 mt-1">Historical NPK readings stored in Firestore</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={handleManualLog}
               disabled={isLogging || deviceReadings.length === 0}
-              className="px-3 py-1.5 text-sm rounded-lg transition-colors bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+              className="px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
               title="Manually log current NPK readings to history"
             >
               {isLogging ? (
@@ -1583,18 +1684,19 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Logging...
+                  <span className="hidden sm:inline">Logging...</span>
                 </>
               ) : (
                 <>
                   <span>📝</span>
-                  Log Now
+                  <span className="hidden sm:inline">Log Now</span>
+                  <span className="sm:hidden">Log</span>
                 </>
               )}
             </button>
             <button
               onClick={() => setTimeRange('7d')}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+              className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
                 timeRange === '7d' 
                   ? 'bg-green-600 text-white' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -1604,7 +1706,7 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             </button>
             <button
               onClick={() => setTimeRange('30d')}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+              className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
                 timeRange === '30d' 
                   ? 'bg-green-600 text-white' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -1614,7 +1716,7 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             </button>
             <button
               onClick={() => setTimeRange('90d')}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+              className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
                 timeRange === '90d' 
                   ? 'bg-green-600 text-white' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -1624,7 +1726,7 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
             </button>
             <button
               onClick={() => setTimeRange('all')}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+              className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${
                 timeRange === 'all' 
                   ? 'bg-green-600 text-white' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -1640,83 +1742,287 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-3"></div>
               <p className="text-gray-500">Loading historical data...</p>
             </div>
-          ) : historicalLogs.length > 0 ? (
-            <div>
-              <div className="mb-4">
-                <p className="text-sm text-gray-600">
-                  Found <strong className="text-green-600">{historicalLogs.length}</strong> logged readings over the last {
-                    timeRange === '7d' ? '7 days' :
-                    timeRange === '30d' ? '30 days' :
-                    timeRange === '90d' ? '90 days' :
-                    'planting period'
-                  }
-                </p>
-              </div>
-              
-              {/* Historical Data Table */}
-              <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead className="sticky top-0 bg-gray-50">
-                    <tr className="border-b-2 border-gray-200">
-                      <th className="text-left py-3 px-4 text-gray-700 font-semibold">Date/Time</th>
-                      <th className="text-left py-3 px-4 text-gray-700 font-semibold">Paddy</th>
-                      <th className="text-right py-3 px-4 text-gray-700 font-semibold">N (mg/kg)</th>
-                      <th className="text-right py-3 px-4 text-gray-700 font-semibold">P (mg/kg)</th>
-                      <th className="text-right py-3 px-4 text-gray-700 font-semibold">K (mg/kg)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {historicalLogs.map((log, index) => {
-                      const logDate = log.timestamp instanceof Date 
-                        ? log.timestamp 
-                        : (log.timestamp ? new Date(log.timestamp) : new Date(log.createdAt || Date.now()));
-                      
-                      return (
-                        <tr key={log.id || index} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                          <td className="py-2 px-4 text-gray-600 whitespace-nowrap">
-                            {logDate.toLocaleString('en-US', { 
-                              month: 'short', 
-                              day: 'numeric',
-                              year: 'numeric',
-                              hour: '2-digit', 
-                              minute: '2-digit' 
-                            })}
-                          </td>
-                          <td className="py-2 px-4 text-gray-600">{log.paddyName || 'Unknown'}</td>
-                          <td className="py-2 px-4 text-right font-medium text-blue-700">
-                            {log.nitrogen !== undefined && log.nitrogen !== null ? Math.round(log.nitrogen) : '--'}
-                          </td>
-                          <td className="py-2 px-4 text-right font-medium text-purple-700">
-                            {log.phosphorus !== undefined && log.phosphorus !== null ? Math.round(log.phosphorus) : '--'}
-                          </td>
-                          <td className="py-2 px-4 text-right font-medium text-orange-700">
-                            {log.potassium !== undefined && log.potassium !== null ? Math.round(log.potassium) : '--'}
-                          </td>
+          ) : (() => {
+            // Merge historical and real-time logs, dedupe, sort
+            const allLogs = [...historicalLogs, ...realtimeLogs];
+            const seen = new Set<string>();
+            const deduped = allLogs.filter(log => {
+              const key = `${Math.floor(log.timestamp.getTime() / 1000)}-${log.paddyId || log.deviceId}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+            const sortedLogs = deduped
+              .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()); // Newest first
+            const chartLogs = sortedLogs
+              .slice()
+              .reverse()
+              .slice(-10); // Last 10 for chart (oldest to newest)
+
+            // Pagination logic
+            const totalPages = Math.ceil(sortedLogs.length / itemsPerPage);
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const paginatedLogs = sortedLogs.slice(startIndex, endIndex);
+
+            return sortedLogs.length > 0 ? (
+              <div className="space-y-6">
+                {/* Info Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div>
+                    <p className="text-sm text-gray-600">
+                      Showing <span className="font-semibold text-gray-900">{sortedLogs.length}</span> reading{sortedLogs.length !== 1 ? 's' : ''} 
+                      {timeRange !== 'all' && (
+                        <span> over the last {
+                          timeRange === '7d' ? '7 days' :
+                          timeRange === '30d' ? '30 days' :
+                          timeRange === '90d' ? '90 days' :
+                          'recording period'
+                        }</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                      Live updates enabled
+                    </p>
+                  </div>
+                </div>
+
+                {/* Chart */}
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <TrendsChart 
+                    logs={chartLogs} 
+                    key={`${historicalLogs.length}-${realtimeLogs.length}-${realtimeLogs[realtimeLogs.length - 1]?.timestamp?.getTime() || 0}`} 
+                  />
+                </div>
+
+                {/* Data Table */}
+                <div className="overflow-hidden">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                    <h4 className="text-md font-semibold text-gray-900">Reading History</h4>
+                    {totalPages > 1 && (
+                      <p className="text-xs sm:text-sm text-gray-600">
+                        Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
+                        {' '}({startIndex + 1}-{Math.min(endIndex, sortedLogs.length)} of {sortedLogs.length})
+                      </p>
+                    )}
+                  </div>
+                  
+                  {/* Desktop Table */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b-2 border-gray-200">
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Timestamp</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Paddy</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Nitrogen (N)</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Phosphorus (P)</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Potassium (K)</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Source</th>
                         </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {paginatedLogs.map((log, index) => {
+                          const globalIndex = startIndex + index;
+                          return (
+                            <tr 
+                              key={log.id || `log-${globalIndex}`} 
+                              className={`hover:bg-gray-50 transition-colors ${
+                                globalIndex === 0 && realtimeLogs.some(rt => rt.id === log.id) ? 'bg-green-50' : ''
+                              }`}
+                            >
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                {log.timestamp.toLocaleString('en-US', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit'
+                                })}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                                {log.paddyName || 'Unknown'}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-700">
+                                {log.nitrogen !== undefined && log.nitrogen !== null ? `${Math.round(log.nitrogen)} mg/kg` : '--'}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-purple-700">
+                                {log.phosphorus !== undefined && log.phosphorus !== null ? `${Math.round(log.phosphorus)} mg/kg` : '--'}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-orange-700">
+                                {log.potassium !== undefined && log.potassium !== null ? `${Math.round(log.potassium)} mg/kg` : '--'}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-xs">
+                                <span className={`px-2 py-1 rounded-full ${
+                                  log._src === 'rtdb' ? 'bg-green-100 text-green-800' :
+                                  log._src === 'paddy' ? 'bg-blue-100 text-blue-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {log._src === 'rtdb' ? 'Live' : log._src === 'paddy' ? 'Paddy Log' : 'Device Log'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Mobile Cards */}
+                  <div className="md:hidden space-y-3">
+                    {paginatedLogs.map((log, index) => {
+                      const globalIndex = startIndex + index;
+                      return (
+                        <div 
+                          key={log.id || `log-${globalIndex}`}
+                          className={`bg-white border rounded-lg p-4 shadow-sm ${
+                            globalIndex === 0 && realtimeLogs.some(rt => rt.id === log.id) ? 'border-green-300 bg-green-50' : 'border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex-1">
+                              <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Paddy</p>
+                              <p className="text-sm font-medium text-gray-900">{log.paddyName || 'Unknown'}</p>
+                              <p className="text-xs font-semibold text-gray-500 uppercase mb-1 mt-2">Timestamp</p>
+                              <p className="text-sm text-gray-900">
+                                {log.timestamp.toLocaleString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit'
+                                })}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {log.timestamp.toLocaleDateString('en-US', { year: 'numeric' })}
+                              </p>
+                            </div>
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              log._src === 'rtdb' ? 'bg-green-100 text-green-800' :
+                              log._src === 'paddy' ? 'bg-blue-100 text-blue-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {log._src === 'rtdb' ? 'Live' : log._src === 'paddy' ? 'Paddy' : 'Device'}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3">
+                            <div>
+                              <p className="text-xs font-semibold text-blue-600 mb-1">Nitrogen (N)</p>
+                              <p className="text-lg font-bold text-blue-700">
+                                {log.nitrogen !== undefined && log.nitrogen !== null ? Math.round(log.nitrogen) : '--'}
+                              </p>
+                              <p className="text-xs text-gray-500">mg/kg</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-purple-600 mb-1">Phosphorus (P)</p>
+                              <p className="text-lg font-bold text-purple-700">
+                                {log.phosphorus !== undefined && log.phosphorus !== null ? Math.round(log.phosphorus) : '--'}
+                              </p>
+                              <p className="text-xs text-gray-500">mg/kg</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-orange-600 mb-1">Potassium (K)</p>
+                              <p className="text-lg font-bold text-orange-700">
+                                {log.potassium !== undefined && log.potassium !== null ? Math.round(log.potassium) : '--'}
+                              </p>
+                              <p className="text-xs text-gray-500">mg/kg</p>
+                            </div>
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </div>
+
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <div className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
+                        Showing {startIndex + 1} to {Math.min(endIndex, sortedLogs.length)} of {sortedLogs.length} readings
+                      </div>
+                      <div className="flex items-center gap-1 sm:gap-2">
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                          disabled={currentPage === 1}
+                          className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
+                            currentPage === 1
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          <span className="hidden sm:inline">Previous</span>
+                          <span className="sm:hidden">Prev</span>
+                        </button>
+                        
+                        {/* Page Numbers */}
+                        <div className="flex items-center gap-1">
+                          {(() => {
+                            const maxPages = 5;
+                            const pagesToShow = Math.min(maxPages, totalPages);
+                            
+                            let startPage = 1;
+                            if (totalPages > maxPages) {
+                              if (currentPage <= 3) {
+                                startPage = 1;
+                              } else if (currentPage >= totalPages - 2) {
+                                startPage = totalPages - maxPages + 1;
+                              } else {
+                                startPage = currentPage - 2;
+                              }
+                            }
+                            
+                            return Array.from({ length: pagesToShow }, (_, i) => {
+                              const pageNum = startPage + i;
+                              return (
+                                <button
+                                  key={pageNum}
+                                  onClick={() => setCurrentPage(pageNum)}
+                                  className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
+                                    currentPage === pageNum
+                                      ? 'bg-green-600 text-white'
+                                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                  }`}
+                                >
+                                  {pageNum}
+                                </button>
+                              );
+                            });
+                          })()}
+                        </div>
+                        
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                          disabled={currentPage === totalPages}
+                          className={`px-2 sm:px-3 py-2 text-xs sm:text-sm rounded-lg transition-colors ${
+                            currentPage === totalPages
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              
-              <p className="text-xs text-gray-400 mt-4 text-center">Chart visualization coming soon</p>
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <div className="text-5xl mb-3">📊</div>
-              <p className="text-gray-500 font-medium">No historical data found</p>
-              <p className="text-sm text-gray-400 mt-2">
-                {deviceReadings.length > 0 
-                  ? 'NPK readings will be automatically logged to Firestore. Check back later!'
-                  : 'Connect devices to start logging NPK readings.'}
-              </p>
-              {deviceReadings.length > 0 && (
-                <p className="text-xs text-gray-400 mt-1">
-                  Current devices: {deviceReadings.filter(r => r.npk).length} with NPK data
+            ) : (
+              <div className="text-center py-8">
+                <div className="text-5xl mb-3">📊</div>
+                <p className="text-gray-500 font-medium">No historical data found</p>
+                <p className="text-sm text-gray-400 mt-2">
+                  {deviceReadings.length > 0 
+                    ? 'NPK readings will be automatically logged to Firestore. Check back later!'
+                    : 'Connect devices to start logging NPK readings.'}
                 </p>
-              )}
-            </div>
-          )}
+                {deviceReadings.length > 0 && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Current devices: {deviceReadings.filter(r => r.npk).length} with NPK data
+                  </p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -1818,6 +2124,9 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
 function InformationTab({ field, onFieldUpdate }: { field: any; onFieldUpdate: () => void }) {
   const { user } = useAuth();
   const [isConcluding, setIsConcluding] = useState(false);
+  const [isEditingFieldName, setIsEditingFieldName] = useState(false);
+  const [fieldNameValue, setFieldNameValue] = useState('');
+  const [isSavingFieldName, setIsSavingFieldName] = useState(false);
   
   if (!field) return null;
 
@@ -1878,6 +2187,47 @@ function InformationTab({ field, onFieldUpdate }: { field: any; onFieldUpdate: (
     }
   };
 
+  const handleStartEditFieldName = () => {
+    setFieldNameValue(field.fieldName || '');
+    setIsEditingFieldName(true);
+  };
+
+  const handleCancelEditFieldName = () => {
+    setIsEditingFieldName(false);
+    setFieldNameValue('');
+  };
+
+  const handleSaveFieldName = async () => {
+    if (!user || !field.id) return;
+    
+    const trimmedName = fieldNameValue.trim();
+    if (!trimmedName) {
+      alert('Field name cannot be empty');
+      return;
+    }
+
+    if (trimmedName === field.fieldName) {
+      setIsEditingFieldName(false);
+      return;
+    }
+
+    setIsSavingFieldName(true);
+    try {
+      const fieldRef = doc(db, `users/${user.uid}/fields/${field.id}`);
+      await updateDoc(fieldRef, {
+        fieldName: trimmedName,
+      });
+
+      setIsEditingFieldName(false);
+      onFieldUpdate(); // Refresh field data
+    } catch (error) {
+      console.error('Error updating field name:', error);
+      alert('Failed to update field name');
+    } finally {
+      setIsSavingFieldName(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl shadow-md p-6">
@@ -1896,8 +2246,51 @@ function InformationTab({ field, onFieldUpdate }: { field: any; onFieldUpdate: (
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <p className="text-sm text-gray-600 mb-1">Field Name</p>
-            <p className="text-lg font-medium text-gray-900">{field.fieldName}</p>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm text-gray-600">Field Name</p>
+              {!isEditingFieldName && (
+                <button
+                  onClick={handleStartEditFieldName}
+                  className="text-green-600 hover:text-green-700 text-sm font-medium"
+                  title="Edit field name"
+                >
+                  ✏️ Edit
+                </button>
+              )}
+            </div>
+            {isEditingFieldName ? (
+              <div className="space-y-2">
+                <Input
+                  type="text"
+                  value={fieldNameValue}
+                  onChange={(e) => setFieldNameValue(e.target.value)}
+                  className="text-lg font-medium"
+                  placeholder="Enter field name"
+                  disabled={isSavingFieldName}
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleSaveFieldName}
+                    disabled={isSavingFieldName || !fieldNameValue.trim()}
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {isSavingFieldName ? 'Saving...' : 'Save'}
+                  </Button>
+                  <Button
+                    onClick={handleCancelEditFieldName}
+                    disabled={isSavingFieldName}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-lg font-medium text-gray-900">{field.fieldName}</p>
+            )}
           </div>
           <div>
             <p className="text-sm text-gray-600 mb-1">Rice Variety</p>
@@ -1996,6 +2389,78 @@ function InformationTab({ field, onFieldUpdate }: { field: any; onFieldUpdate: (
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Trends Chart Component
+function TrendsChart({ logs }: { logs: Array<{ timestamp: Date; nitrogen?: number; phosphorus?: number; potassium?: number }> }) {
+  
+  const data = useMemo(() => {
+    // Ensure chronological order (oldest → newest)
+    const ordered = [...logs].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const labels = ordered.map((l) => l.timestamp.toLocaleString(undefined, { 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }));
+
+    return {
+    labels,
+    datasets: [
+      {
+        label: 'Nitrogen (mg/kg)',
+        data: ordered.map((l) => l.nitrogen ?? null),
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37, 99, 235, 0.2)',
+        tension: 0.3,
+        spanGaps: true,
+      },
+      {
+        label: 'Phosphorus (mg/kg)',
+        data: ordered.map((l) => l.phosphorus ?? null),
+        borderColor: '#7c3aed',
+        backgroundColor: 'rgba(124, 58, 237, 0.2)',
+        tension: 0.3,
+        spanGaps: true,
+      },
+      {
+        label: 'Potassium (mg/kg)',
+        data: ordered.map((l) => l.potassium ?? null),
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.2)',
+        tension: 0.3,
+        spanGaps: true,
+      },
+    ],
+    };
+  }, [logs]);
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: {
+      duration: 750,
+    },
+    plugins: {
+      legend: { position: 'top' as const },
+      tooltip: { mode: 'index' as const, intersect: false },
+    },
+    scales: {
+      y: { beginAtZero: true, title: { display: true, text: 'mg/kg' } },
+      x: {
+        ticks: {
+          maxRotation: 45,
+          minRotation: 45
+        }
+      }
+    },
+  };
+
+  return (
+    <div style={{ height: 320 }}>
+      <Line data={data} options={options} />
     </div>
   );
 }

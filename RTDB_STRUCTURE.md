@@ -64,6 +64,8 @@ void sendHeartbeat() {
 
 **Update Frequency:** Every 5-10 minutes (configurable)
 
+**Write Method:** Use SET/PUT to fixed paths (do not POST/push). Keep RTDB as the current snapshot; history is handled by Firestore via Cloud Function.
+
 **Implementation:**
 ```cpp
 void updateSensorReadings() {

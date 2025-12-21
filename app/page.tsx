@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import Banner from "@/components/Banner";
 import { usePageVisibility } from "@/lib/hooks/usePageVisibility";
+import { useDeviceMonitoring } from "@/lib/hooks/useDeviceMonitoring";
 
 // Admin email for access control
 const ADMIN_EMAIL = 'ricepaddy.contact@gmail.com';
@@ -105,17 +106,46 @@ export default function Home() {
           let fieldTotalDevices = 0;
           let fieldOfflineDevices = 0;
           let fieldIssueDevices = 0;
+          const paddies: any[] = [];
           
-          paddiesSnapshot.forEach(paddyDoc => {
+          // Process each paddy and check device status from RTDB
+          for (const paddyDoc of paddiesSnapshot.docs) {
+            const paddyData = { id: paddyDoc.id, ...paddyDoc.data() };
+            paddies.push(paddyData);
+            
             fieldTotalDevices++;
             totalDevices++;
-            const paddyData = paddyDoc.data();
             
-            // TODO: Check actual heartbeat from Firebase RTDB
-            const hasHeartbeat = false; // Placeholder
-            const hasReadings = false; // TODO: Check actual sensor readings
+            // Check actual device status from Firebase RTDB
+            let hasHeartbeat = false;
+            let hasReadings = false;
             
-            if (!hasHeartbeat && !hasReadings) {
+            if (paddyData.deviceId) {
+              try {
+                const deviceRef = ref(database, `devices/${paddyData.deviceId}`);
+                const deviceSnap = await get(deviceRef);
+                
+                if (deviceSnap.exists()) {
+                  const deviceData = deviceSnap.val();
+                  
+                  // Check if device has status = "connected" or recent timestamp
+                  hasHeartbeat = deviceData.status === 'connected' || 
+                    deviceData.status === 'alive' ||
+                    (deviceData.npk?.timestamp && deviceData.npk.timestamp > Date.now() - 10 * 60 * 1000); // Within 10 mins
+                  
+                  // Check if NPK readings exist
+                  hasReadings = deviceData.npk && (
+                    deviceData.npk.n !== undefined || 
+                    deviceData.npk.p !== undefined || 
+                    deviceData.npk.k !== undefined
+                  );
+                }
+              } catch (rtdbError) {
+                console.error('Error checking device status:', paddyData.deviceId, rtdbError);
+              }
+            }
+            
+            if (!hasHeartbeat) {
               fieldOfflineDevices++;
               issueDevices++;
             } else if (hasHeartbeat && !hasReadings) {
@@ -124,10 +154,11 @@ export default function Home() {
             } else {
               healthyDevices++;
             }
-          });
+          }
           
           return {
             ...fieldData,
+            paddies, // Include paddies for monitoring
             deviceStats: {
               total: fieldTotalDevices,
               offline: fieldOfflineDevices,
@@ -158,6 +189,20 @@ export default function Home() {
   useEffect(() => {
     fetchFields();
   }, [user]);
+
+  // Monitor all devices for offline status
+  useDeviceMonitoring(
+    fields.flatMap(field => 
+      field.paddies?.map((paddy: any) => ({
+        userId: user?.uid || '',
+        deviceId: paddy.deviceId,
+        paddyName: paddy.paddyName,
+        fieldId: field.id,
+        fieldName: field.fieldName,
+        enabled: !!user && !!paddy.deviceId
+      })) || []
+    )
+  );
   
   const handleStep2Submit = async (e: React.FormEvent) => {
     e.preventDefault();

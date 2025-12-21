@@ -300,60 +300,108 @@ async function syncData() {
   console.log('[SW] Syncing data...');
 }
 
-// Handle push notifications
+// Handle push notifications (FCM)
 self.addEventListener('push', (event) => {
   console.log('[SW] Push received:', event);
   
-  let data = { title: 'PadBuddy', body: 'New notification' };
+  let notificationData = { 
+    title: 'PadBuddy', 
+    body: 'New notification',
+    icon: '/icons/rice_logo.png',
+    badge: '/icons/rice_logo.png',
+    data: {}
+  };
   
   if (event.data) {
     try {
-      data = event.data.json();
+      const payload = event.data.json();
+      // Handle FCM notification payload
+      if (payload.notification) {
+        notificationData = {
+          title: payload.notification.title || 'PadBuddy',
+          body: payload.notification.body || 'New notification',
+          icon: payload.notification.icon || '/icons/rice_logo.png',
+          badge: '/icons/rice_logo.png',
+          data: payload.data || {}
+        };
+      } else {
+        // Handle custom data payload
+        notificationData = {
+          title: payload.title || 'PadBuddy',
+          body: payload.body || 'New notification',
+          icon: payload.icon || '/icons/rice_logo.png',
+          badge: '/icons/rice_logo.png',
+          data: payload.data || payload
+        };
+      }
     } catch (e) {
-      data.body = event.data.text();
+      // Fallback for text payload
+      notificationData.body = event.data.text();
     }
   }
   
   const options = {
-    body: data.body,
-    icon: '/icons/rice_logo.png',
-    badge: '/icons/rice_logo.png',
+    body: notificationData.body,
+    icon: notificationData.icon,
+    badge: notificationData.badge,
     vibrate: [100, 50, 100],
     data: {
+      ...notificationData.data,
       dateOfArrival: Date.now(),
-      primaryKey: 1
     },
+    requireInteraction: false,
+    silent: false,
     actions: [
-      { action: 'explore', title: 'View' },
+      { action: 'view', title: 'View' },
       { action: 'close', title: 'Close' }
-    ]
+    ],
+    tag: notificationData.data.notificationId || 'padbuddy-notification',
   };
   
   event.waitUntil(
-    self.registration.showNotification(data.title, options)
+    self.registration.showNotification(notificationData.title, options)
   );
 });
 
 // Handle notification click
 self.addEventListener('notificationclick', (event) => {
-  console.log('[SW] Notification click:', event.action);
+  console.log('[SW] Notification click:', event.action, event.notification.data);
   event.notification.close();
   
-  if (event.action === 'explore' || !event.action) {
+  const notificationData = event.notification.data || {};
+  let urlToOpen = '/';
+  
+  // Determine URL from notification data
+  if (notificationData.actionUrl) {
+    urlToOpen = notificationData.actionUrl;
+  } else if (notificationData.paddyId) {
+    urlToOpen = `/device/${notificationData.paddyId}`;
+  } else if (notificationData.fieldId) {
+    urlToOpen = `/field/${notificationData.fieldId}`;
+  }
+  
+  if (event.action === 'view' || !event.action) {
     event.waitUntil(
-      clients.matchAll({ type: 'window' }).then((clientList) => {
-        // Focus existing window or open new one
+      clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        // Focus existing window if app is already open
         for (const client of clientList) {
-          if (client.url === '/' && 'focus' in client) {
-            return client.focus();
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
+            return client.focus().then(() => {
+              // Navigate to the notification URL
+              if (client.navigate) {
+                return client.navigate(urlToOpen);
+              }
+            });
           }
         }
+        // Open new window if app is not open
         if (clients.openWindow) {
-          return clients.openWindow('/');
+          return clients.openWindow(urlToOpen);
         }
       })
     );
   }
+  // 'close' action - just close the notification (already closed above)
 });
 
 // Message handler for manual cache updates
