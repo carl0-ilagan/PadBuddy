@@ -113,22 +113,23 @@ export default function NotificationBell() {
         )}
       </button>
 
-      {/* Dropdown Panel with Smooth Animation */}
+      {/* Dropdown Panel with Smooth Animation - Mobile Responsive */}
       <div
-        className={`absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-lg shadow-2xl border border-gray-200 z-50 max-h-[80vh] flex flex-col transition-all duration-300 ease-out ${
+        className={`absolute right-0 sm:right-0 mt-2 mx-4 sm:mx-0 w-[calc(100vw-2rem)] sm:w-80 md:w-96 max-w-sm bg-white rounded-lg shadow-2xl border border-gray-200 z-50 max-h-[85vh] sm:max-h-[80vh] flex flex-col transition-all duration-300 ease-out ${
           isOpen
             ? 'opacity-100 translate-y-0 pointer-events-auto'
             : 'opacity-0 -translate-y-2 pointer-events-none'
         }`}
       >
           {/* Header */}
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-semibold text-gray-900">Notifications</h3>
+          <div className="p-3 sm:p-4 border-b border-gray-200">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900">Notifications</h3>
               {unreadCount > 0 && (
                 <button
                   onClick={markAllAsRead}
-                  className="text-xs text-green-600 hover:text-green-700 font-medium"
+                  className="text-xs text-green-600 hover:text-green-700 font-medium px-2 py-1 -mr-2 touch-manipulation"
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
                 >
                   Mark all read
                 </button>
@@ -136,19 +137,20 @@ export default function NotificationBell() {
             </div>
             {/* Push Notification Status */}
             {isSupported && permission !== 'granted' && (
-              <div className="mt-2 p-2 bg-blue-50 rounded-lg">
-                <p className="text-xs text-gray-600 mb-1">Enable push notifications to get alerts even when the app is closed</p>
+              <div className="mt-2 p-2 sm:p-2.5 bg-blue-50 rounded-lg">
+                <p className="text-xs text-gray-600 mb-1.5 sm:mb-1 leading-relaxed">Enable push notifications to get alerts even when the app is closed</p>
                 <button
                   onClick={handleEnablePushNotifications}
                   disabled={isRequestingPermission}
-                  className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-xs bg-blue-600 text-white px-3 py-2 sm:py-1 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation w-full sm:w-auto"
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
                 >
                   {isRequestingPermission ? 'Enabling...' : permission === 'denied' ? 'Enable in Browser Settings' : 'Enable Push Notifications'}
                 </button>
               </div>
             )}
             {isSupported && permission === 'granted' && (
-              <div className="mt-2 p-2 bg-green-50 rounded-lg">
+              <div className="mt-2 p-2 sm:p-2.5 bg-green-50 rounded-lg">
                 <p className="text-xs text-green-700">✓ Push notifications enabled</p>
               </div>
             )}
@@ -173,33 +175,34 @@ export default function NotificationBell() {
                   <button
                     key={notification.id}
                     onClick={() => handleNotificationClick(notification)}
-                    className={`w-full p-4 text-left hover:bg-gray-50 transition-colors ${
+                    className={`w-full p-3 sm:p-4 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors touch-manipulation ${
                       !notification.read ? 'bg-green-50' : ''
                     }`}
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
                   >
-                    <div className="flex gap-3">
+                    <div className="flex gap-2 sm:gap-3">
                       {/* Icon */}
-                      <div className="text-2xl flex-shrink-0">
+                      <div className="text-xl sm:text-2xl flex-shrink-0">
                         {getNotificationIcon(notification.type, notification.icon)}
                       </div>
                       
                       {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
-                          <p className={`text-sm font-medium text-gray-900 ${!notification.read ? 'font-semibold' : ''}`}>
+                          <p className={`text-sm sm:text-sm font-medium text-gray-900 leading-snug ${!notification.read ? 'font-semibold' : ''}`}>
                             {notification.title}
                           </p>
                           {!notification.read && (
-                            <span className="w-2 h-2 bg-green-600 rounded-full flex-shrink-0 mt-1"></span>
+                            <span className="w-2 h-2 bg-green-600 rounded-full flex-shrink-0 mt-1.5"></span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-600 mt-0.5 line-clamp-2">
+                        <p className="text-sm text-gray-600 mt-0.5 sm:mt-1 line-clamp-2 sm:line-clamp-3 leading-relaxed">
                           {notification.message}
                         </p>
                         
                         {/* Field/Paddy Info */}
                         {(notification.fieldName || notification.paddyName) && (
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 mt-1 truncate">
                             {notification.fieldName}
                             {notification.paddyName && ` • ${notification.paddyName}`}
                           </p>
@@ -219,13 +222,14 @@ export default function NotificationBell() {
 
           {/* Footer */}
           {notifications.length > 0 && (
-            <div className="p-3 border-t border-gray-200 text-center">
+            <div className="p-3 sm:p-4 border-t border-gray-200 text-center">
               <button
                 onClick={() => {
                   setIsOpen(false);
                   // TODO: Navigate to full notifications page
                 }}
-                className="text-sm text-green-600 hover:text-green-700 font-medium"
+                className="text-sm text-green-600 hover:text-green-700 active:text-green-800 font-medium py-2 px-4 touch-manipulation"
+                style={{ WebkitTapHighlightColor: 'transparent' }}
               >
                 View all notifications
               </button>

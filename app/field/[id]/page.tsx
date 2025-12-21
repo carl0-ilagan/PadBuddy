@@ -1144,7 +1144,24 @@ function getDeviceStatus(paddy: any, deviceReadings: any[]) {
     deviceReading.npk.k !== undefined
   );
   
-  if (deviceStatus !== 'connected') {
+  // Check if device has recent NPK timestamp (within last 10 minutes)
+  let hasRecentNPK = false;
+  if (deviceReading.npk?.timestamp) {
+    const npkTimestamp = deviceReading.npk.timestamp;
+    // Handle both seconds and milliseconds timestamps
+    const npkTime = npkTimestamp < 10000000000 ? npkTimestamp * 1000 : npkTimestamp;
+    const timeSinceNPK = Date.now() - npkTime;
+    hasRecentNPK = timeSinceNPK < 10 * 60 * 1000; // 10 minutes
+  }
+  
+  // Device is online if:
+  // 1. Status is 'connected' or 'alive' (ESP32 sends 'alive')
+  // 2. OR has recent NPK readings (within 10 minutes)
+  const isOnline = deviceStatus === 'connected' || 
+                   deviceStatus === 'alive' || 
+                   hasRecentNPK;
+  
+  if (!isOnline) {
     return {
       status: 'offline',
       message: 'Device is offline. Check power supply and network connection.',
@@ -1153,7 +1170,7 @@ function getDeviceStatus(paddy: any, deviceReadings: any[]) {
     };
   }
   
-  if (deviceStatus === 'connected' && !hasNPK) {
+  if (isOnline && !hasNPK) {
     return {
       status: 'sensor-issue',
       message: 'Device is online but sensors are not reporting data. Check sensor connections.',
