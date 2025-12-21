@@ -1,10 +1,10 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db, database } from '@/lib/firebase';
-import { doc, getDoc, collection, getDocs, updateDoc, setDoc, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, updateDoc, setDoc, query, where, orderBy, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { ref, onValue } from 'firebase/database';
 import {
   Chart as ChartJS,
@@ -544,6 +544,7 @@ export default function FieldDetail() {
                   paddies={paddies} 
                   deviceReadings={deviceReadings} 
                   fieldId={fieldId}
+                  setDeviceReadings={setDeviceReadings}
                   key={`stats-${paddies.length}-${deviceReadings.length}`}
                 />
               )}
@@ -978,46 +979,6 @@ function OverviewTab({ field, paddies }: { field: any; paddies: any[] }) {
         )}
       </div>
 
-      {/* Growth Stages */}
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Growth Stages</h2>
-        <div className="space-y-2">
-          {variety?.growthStages?.map((stage, index) => {
-            const isPassed = daysSincePlanting > stage.endDay;
-            const isCurrent = daysSincePlanting >= stage.startDay && daysSincePlanting <= stage.endDay;
-            
-            return (
-              <div
-                key={index}
-                className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
-                  isCurrent ? 'bg-green-50 border-green-300' :
-                  isPassed ? 'bg-gray-50 border-gray-200' :
-                  'bg-white border-gray-200'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-3 h-3 rounded-full ${
-                      isPassed ? 'bg-green-600' :
-                      isCurrent ? 'bg-green-600 animate-pulse' :
-                      'bg-gray-300'
-                    }`}
-                  />
-                  <span className={`font-medium ${
-                    isCurrent ? 'text-green-900' : 'text-gray-900'
-                  }`}>
-                    {stage.name}
-                  </span>
-                </div>
-                <span className="text-sm text-gray-600">
-                  {stage.startDay}-{stage.endDay} days
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Activities & Tasks */}
       <div className="bg-white rounded-xl shadow-md p-6">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Activities & Tasks</h2>
@@ -1131,6 +1092,46 @@ function OverviewTab({ field, paddies }: { field: any; paddies: any[] }) {
           <p className="text-gray-500 text-center py-8">No upcoming activities</p>
         )}
       </div>
+
+      {/* Growth Stages */}
+      <div className="bg-white rounded-xl shadow-md p-6">
+        <h2 className="text-xl font-bold text-gray-900 mb-4">Growth Stages</h2>
+        <div className="space-y-2">
+          {variety?.growthStages?.map((stage, index) => {
+            const isPassed = daysSincePlanting > stage.endDay;
+            const isCurrent = daysSincePlanting >= stage.startDay && daysSincePlanting <= stage.endDay;
+            
+            return (
+              <div
+                key={index}
+                className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
+                  isCurrent ? 'bg-green-50 border-green-300' :
+                  isPassed ? 'bg-gray-50 border-gray-200' :
+                  'bg-white border-gray-200'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-3 h-3 rounded-full ${
+                      isPassed ? 'bg-green-600' :
+                      isCurrent ? 'bg-green-600 animate-pulse' :
+                      'bg-gray-300'
+                    }`}
+                  />
+                  <span className={`font-medium ${
+                    isCurrent ? 'text-green-900' : 'text-gray-900'
+                  }`}>
+                    {stage.name}
+                  </span>
+                </div>
+                <span className="text-sm text-gray-600">
+                  {stage.startDay}-{stage.endDay} days
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1217,48 +1218,27 @@ function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onViewLocat
             const deviceStatus = getDeviceStatus(paddy, deviceReadings || []);
             const deviceReading = deviceReadings?.find(r => r.deviceId === paddy.deviceId);
             const npk = deviceReading?.npk;
+            // Extract temperature and humidity from device reading
+            const temperature = deviceReading?.sensors?.temperature ?? deviceReading?.temperature;
+            const humidity = deviceReading?.sensors?.humidity ?? deviceReading?.humidity;
+            const hasNPK = npk && (npk.n !== undefined || npk.p !== undefined || npk.k !== undefined);
+            const hasTempHumidity = temperature !== undefined || humidity !== undefined;
             
             return (
               <div 
                 key={paddy.id} 
                 onClick={() => router.push(`/device/${paddy.deviceId}`)}
                 className="bg-white rounded-xl shadow-md border border-gray-200 p-6 hover:border-green-500 hover:shadow-lg transition-all cursor-pointer">
-                <div className="flex justify-between items-start">
+                {/* Header Section */}
+                <div className="flex justify-between items-start mb-4">
                   <div className="flex-1">
                     <h3 className="font-semibold text-gray-900">{paddy.paddyName}</h3>
                     <p className="text-sm text-gray-600">Device: {paddy.deviceId}</p>
                     {paddy.description && (
                       <p className="text-sm text-gray-500 mt-2">{paddy.description}</p>
                     )}
-                    
-                    {/* NPK Values */}
-                    {npk && (npk.n !== undefined || npk.p !== undefined || npk.k !== undefined) && (
-                      <div className="mt-3 grid grid-cols-3 gap-2">
-                        {npk.n !== undefined && (
-                          <div className="bg-blue-50 rounded-lg p-2">
-                            <p className="text-xs text-blue-600 font-medium">N</p>
-                            <p className="text-sm font-bold text-blue-900">{Math.round(npk.n)}</p>
-                            <p className="text-xs text-blue-500">mg/kg</p>
-                          </div>
-                        )}
-                        {npk.p !== undefined && (
-                          <div className="bg-purple-50 rounded-lg p-2">
-                            <p className="text-xs text-purple-600 font-medium">P</p>
-                            <p className="text-sm font-bold text-purple-900">{Math.round(npk.p)}</p>
-                            <p className="text-xs text-purple-500">mg/kg</p>
-                          </div>
-                        )}
-                        {npk.k !== undefined && (
-                          <div className="bg-orange-50 rounded-lg p-2">
-                            <p className="text-xs text-orange-600 font-medium">K</p>
-                            <p className="text-sm font-bold text-orange-900">{Math.round(npk.k)}</p>
-                            <p className="text-xs text-orange-500">mg/kg</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 ml-4">
                     <button
                       onClick={(e) => onViewLocation(paddy, e)}
                       className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -1278,6 +1258,55 @@ function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onViewLocat
                     </span>
                   </div>
                 </div>
+                
+                {/* NPK Values and Temperature/Humidity - Full Width */}
+                {(hasNPK || hasTempHumidity) && (
+                  <div className={`grid gap-3 ${
+                    hasTempHumidity 
+                      ? 'grid-cols-3 sm:grid-cols-5' 
+                      : 'grid-cols-3'
+                  }`}>
+                    {npk?.n !== undefined && (
+                      <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                        <p className="text-xs text-blue-600 font-semibold mb-1">Nitrogen</p>
+                        <p className="text-lg font-bold text-blue-900">{Math.round(npk.n)}</p>
+                        <p className="text-xs text-blue-500 mt-0.5">mg/kg</p>
+                      </div>
+                    )}
+                    {npk?.p !== undefined && (
+                      <div className="bg-purple-50 rounded-lg p-3 border border-purple-100">
+                        <p className="text-xs text-purple-600 font-semibold mb-1">Phosphorus</p>
+                        <p className="text-lg font-bold text-purple-900">{Math.round(npk.p)}</p>
+                        <p className="text-xs text-purple-500 mt-0.5">mg/kg</p>
+                      </div>
+                    )}
+                    {npk?.k !== undefined && (
+                      <div className="bg-orange-50 rounded-lg p-3 border border-orange-100">
+                        <p className="text-xs text-orange-600 font-semibold mb-1">Potassium</p>
+                        <p className="text-lg font-bold text-orange-900">{Math.round(npk.k)}</p>
+                        <p className="text-xs text-orange-500 mt-0.5">mg/kg</p>
+                      </div>
+                    )}
+                    {temperature !== undefined && (
+                      <div className="bg-red-50 rounded-lg p-3 border border-red-100">
+                        <p className="text-xs text-red-600 font-semibold mb-1 flex items-center gap-1">
+                          <span>🌡️</span> Temperature
+                        </p>
+                        <p className="text-lg font-bold text-red-900">{Math.round(temperature)}</p>
+                        <p className="text-xs text-red-500 mt-0.5">°C</p>
+                      </div>
+                    )}
+                    {humidity !== undefined && (
+                      <div className="bg-cyan-50 rounded-lg p-3 border border-cyan-100">
+                        <p className="text-xs text-cyan-600 font-semibold mb-1 flex items-center gap-1">
+                          <span>💧</span> Humidity
+                        </p>
+                        <p className="text-lg font-bold text-cyan-900">{Math.round(humidity)}</p>
+                        <p className="text-xs text-cyan-500 mt-0.5">%</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className={`mt-3 p-3 rounded-lg text-sm ${
                   deviceStatus.color === 'green' ? 'bg-green-50 text-green-800' :
                   deviceStatus.color === 'yellow' ? 'bg-yellow-50 text-yellow-800' :
@@ -1295,7 +1324,7 @@ function PaddiesTab({ paddies, deviceReadings, fieldId, onAddDevice, onViewLocat
 }
 
 // Statistics Tab Component
-function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; deviceReadings: any[]; fieldId: string }) {
+function StatisticsTab({ paddies, deviceReadings, fieldId, setDeviceReadings }: { paddies: any[]; deviceReadings: any[]; fieldId: string; setDeviceReadings: React.Dispatch<React.SetStateAction<any[]>> }) {
   const { user } = useAuth();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('7d');
   const [historicalLogs, setHistoricalLogs] = useState<any[]>([]);
@@ -1308,6 +1337,8 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
     nitrogen: { current: number | null; average: number | null; min: number | null; max: number | null };
     phosphorus: { current: number | null; average: number | null; min: number | null; max: number | null };
     potassium: { current: number | null; average: number | null; min: number | null; max: number | null };
+    temperature: { current: number | null; average: number | null; min: number | null; max: number | null };
+    humidity: { current: number | null; average: number | null; min: number | null; max: number | null };
   } | null>(null);
   const [hasInitialized, setHasInitialized] = useState(false);
   
@@ -1322,6 +1353,24 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
       .map(r => r.npk);
 
     console.log('[Statistics] NPK values from devices:', npkValues);
+
+    // Extract temperature and humidity from device readings
+    // Check both sensors.temperature/humidity and direct properties
+    const allTemperatureFromDevices = deviceReadings
+      .map(r => {
+        if (!r) return null;
+        // Check sensors object first, then direct properties
+        return r.sensors?.temperature ?? r.temperature ?? null;
+      })
+      .filter(t => t !== null && t !== undefined) as number[];
+    
+    const allHumidityFromDevices = deviceReadings
+      .map(r => {
+        if (!r) return null;
+        // Check sensors object first, then direct properties
+        return r.sensors?.humidity ?? r.humidity ?? null;
+      })
+      .filter(h => h !== null && h !== undefined) as number[];
 
     // Get historical values from logs
     const historicalNitrogen = historicalLogs
@@ -1344,14 +1393,20 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
     const currentNitrogen = allNitrogenFromDevices.length > 0 ? allNitrogenFromDevices[0] : undefined;
     const currentPhosphorus = allPhosphorusFromDevices.length > 0 ? allPhosphorusFromDevices[0] : undefined;
     const currentPotassium = allPotassiumFromDevices.length > 0 ? allPotassiumFromDevices[0] : undefined;
+    const currentTemperature = allTemperatureFromDevices.length > 0 ? allTemperatureFromDevices[0] : undefined;
+    const currentHumidity = allHumidityFromDevices.length > 0 ? allHumidityFromDevices[0] : undefined;
 
     // Combine current and historical for comprehensive stats
     // Include all device values, not just the first one
     const allNitrogen = [...allNitrogenFromDevices, ...historicalNitrogen];
     const allPhosphorus = [...allPhosphorusFromDevices, ...historicalPhosphorus];
     const allPotassium = [...allPotassiumFromDevices, ...historicalPotassium];
+    // Temperature and humidity only from current devices (no historical logs yet)
+    const allTemperature = [...allTemperatureFromDevices];
+    const allHumidity = [...allHumidityFromDevices];
 
     console.log('[Statistics] Combined data - N:', allNitrogen, 'P:', allPhosphorus, 'K:', allPotassium);
+    console.log('[Statistics] Temperature:', allTemperature, 'Humidity:', allHumidity);
 
     const calculateStats = (current: number | undefined, allValues: number[]) => {
       if (allValues.length === 0 && current === undefined) {
@@ -1379,6 +1434,8 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
       nitrogen: calculateStats(currentNitrogen, allNitrogen),
       phosphorus: calculateStats(currentPhosphorus, allPhosphorus),
       potassium: calculateStats(currentPotassium, allPotassium),
+      temperature: calculateStats(currentTemperature, allTemperature),
+      humidity: calculateStats(currentHumidity, allHumidity),
     };
 
     console.log('[Statistics] Calculated stats:', stats);
@@ -1467,6 +1524,51 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
       });
 
       unsubscribers.push(unsubscribe);
+
+      // Real-time listener for temperature and humidity sensors
+      const sensorsRef = ref(database, `devices/${paddy.deviceId}/sensors`);
+      const unsubscribeSensors = onValue(sensorsRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const sensors = snapshot.val();
+          // If temperature or humidity is updated, update deviceReadings directly
+          if (sensors.temperature !== undefined || sensors.humidity !== undefined) {
+            console.log(`[Sensors] Temperature/Humidity updated for ${paddy.deviceId}:`, sensors);
+            // Update deviceReadings state directly to reflect sensor changes
+            setDeviceReadings((prev: any[]) => {
+              const updated = prev.map((reading: any) => {
+                if (reading.deviceId === paddy.deviceId) {
+                  return {
+                    ...reading,
+                    sensors: {
+                      ...reading.sensors,
+                      temperature: sensors.temperature ?? reading.sensors?.temperature,
+                      humidity: sensors.humidity ?? reading.sensors?.humidity,
+                    },
+                    temperature: sensors.temperature ?? reading.temperature,
+                    humidity: sensors.humidity ?? reading.humidity,
+                  };
+                }
+                return reading;
+              });
+              // If device not in readings yet, add it
+              if (!updated.find((r: any) => r.deviceId === paddy.deviceId)) {
+                updated.push({
+                  deviceId: paddy.deviceId,
+                  paddyId: paddy.id,
+                  sensors: {
+                    temperature: sensors.temperature,
+                    humidity: sensors.humidity,
+                  },
+                  temperature: sensors.temperature,
+                  humidity: sensors.humidity,
+                });
+              }
+              return updated;
+            });
+          }
+        }
+      });
+      unsubscribers.push(unsubscribeSensors);
     });
 
     return () => {
@@ -1654,24 +1756,36 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
           )}
         </div>
 
-        {/* Temperature Card - Coming Soon */}
-        <div className="bg-gray-50 rounded-lg shadow-md p-4 opacity-60">
+        {/* Temperature Card */}
+        <div className={`rounded-lg shadow-md p-4 ${fieldStats && fieldStats.temperature.current !== null ? 'bg-white' : 'bg-gray-50 opacity-60'}`}>
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-semibold text-gray-600">Temperature</h3>
             <span className="text-xl">🌡️</span>
           </div>
-          <p className="text-xl font-bold text-gray-600">--</p>
-          <p className="text-xs text-gray-400 mt-1">Coming soon</p>
+          <p className={`text-xl font-bold ${fieldStats && fieldStats.temperature.current !== null ? 'text-orange-600' : 'text-gray-600'}`}>
+            {fieldStats && fieldStats.temperature.current !== null && fieldStats.temperature.current !== undefined
+              ? `${Math.round(fieldStats.temperature.current)}°C`
+              : '--'}
+          </p>
+          {fieldStats && fieldStats.temperature.average !== null && (
+            <p className="text-xs text-gray-400 mt-1">Avg: {Math.round(fieldStats.temperature.average)}°C</p>
+          )}
         </div>
 
-        {/* Humidity Card - Coming Soon */}
-        <div className="bg-gray-50 rounded-lg shadow-md p-4 opacity-60">
+        {/* Humidity Card */}
+        <div className={`rounded-lg shadow-md p-4 ${fieldStats && fieldStats.humidity.current !== null ? 'bg-white' : 'bg-gray-50 opacity-60'}`}>
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-semibold text-gray-600">Humidity</h3>
             <span className="text-xl">💧</span>
           </div>
-          <p className="text-xl font-bold text-gray-600">--</p>
-          <p className="text-xs text-gray-400 mt-1">Coming soon</p>
+          <p className={`text-xl font-bold ${fieldStats && fieldStats.humidity.current !== null ? 'text-blue-600' : 'text-gray-600'}`}>
+            {fieldStats && fieldStats.humidity.current !== null && fieldStats.humidity.current !== undefined
+              ? `${Math.round(fieldStats.humidity.current)}%`
+              : '--'}
+          </p>
+          {fieldStats && fieldStats.humidity.average !== null && (
+            <p className="text-xs text-gray-400 mt-1">Avg: {Math.round(fieldStats.humidity.average)}%</p>
+          )}
         </div>
 
         {/* Water Level Card - Coming Soon */}
@@ -2144,10 +2258,12 @@ function StatisticsTab({ paddies, deviceReadings, fieldId }: { paddies: any[]; d
 // Information Tab Component
 function InformationTab({ field, onFieldUpdate }: { field: any; onFieldUpdate: () => void }) {
   const { user } = useAuth();
+  const router = useRouter();
   const [isConcluding, setIsConcluding] = useState(false);
   const [isEditingFieldName, setIsEditingFieldName] = useState(false);
   const [fieldNameValue, setFieldNameValue] = useState('');
   const [isSavingFieldName, setIsSavingFieldName] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   if (!field) return null;
 
@@ -2246,6 +2362,51 @@ function InformationTab({ field, onFieldUpdate }: { field: any; onFieldUpdate: (
       alert('Failed to update field name');
     } finally {
       setIsSavingFieldName(false);
+    }
+  };
+
+  const handleDeleteField = async () => {
+    if (!user || !field.id) return;
+
+    const confirmMessage = `Are you sure you want to delete "${field.fieldName}"?\n\nThis will permanently delete:\n- The field and all its data\n- All paddies and their logs\n- All task records\n\nThis action cannot be undone.`;
+    
+    if (!confirm(confirmMessage)) return;
+
+    setIsDeleting(true);
+    try {
+      // Delete all paddies and their subcollections
+      const paddiesRef = collection(db, `users/${user.uid}/fields/${field.id}/paddies`);
+      const paddiesSnapshot = await getDocs(paddiesRef);
+      
+      // Delete logs for each paddy
+      for (const paddyDoc of paddiesSnapshot.docs) {
+        const logsRef = collection(db, `users/${user.uid}/fields/${field.id}/paddies/${paddyDoc.id}/logs`);
+        const logsSnapshot = await getDocs(logsRef);
+        for (const logDoc of logsSnapshot.docs) {
+          await deleteDoc(doc(db, `users/${user.uid}/fields/${field.id}/paddies/${paddyDoc.id}/logs/${logDoc.id}`));
+        }
+        // Delete the paddy document
+        await deleteDoc(doc(db, `users/${user.uid}/fields/${field.id}/paddies/${paddyDoc.id}`));
+      }
+
+      // Delete all tasks
+      const tasksRef = collection(db, `users/${user.uid}/fields/${field.id}/tasks`);
+      const tasksSnapshot = await getDocs(tasksRef);
+      for (const taskDoc of tasksSnapshot.docs) {
+        await deleteDoc(doc(db, `users/${user.uid}/fields/${field.id}/tasks/${taskDoc.id}`));
+      }
+
+      // Finally, delete the field document
+      const fieldRef = doc(db, `users/${user.uid}/fields/${field.id}`);
+      await deleteDoc(fieldRef);
+
+      alert('✓ Field deleted successfully');
+      router.push('/'); // Navigate to home
+    } catch (error) {
+      console.error('Error deleting field:', error);
+      alert('Failed to delete field. Please try again.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -2410,6 +2571,23 @@ function InformationTab({ field, onFieldUpdate }: { field: any; onFieldUpdate: (
           </button>
         </div>
       )}
+
+      {/* Delete Field Section */}
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+        <h3 className="text-lg font-semibold text-red-900 mb-2">
+          🗑️ Delete Field
+        </h3>
+        <p className="text-sm text-red-700 mb-4">
+          Permanently delete this field and all associated data including paddies, logs, and task records. This action cannot be undone.
+        </p>
+        <button
+          onClick={handleDeleteField}
+          disabled={isDeleting}
+          className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-all disabled:bg-gray-400 disabled:cursor-not-allowed"
+        >
+          {isDeleting ? 'Deleting...' : '🗑️ Delete Field'}
+        </button>
+      </div>
     </div>
   );
 }
