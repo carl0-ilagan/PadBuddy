@@ -32,6 +32,11 @@
           ".read": "auth != null",
           ".write": true
         },
+        // Sensors data - ESP32 can write, users can read
+        "sensors": {
+          ".read": "auth != null",
+          ".write": true
+        },
         // All other paths require authentication for writes
         "$other": {
           ".read": "auth != null",

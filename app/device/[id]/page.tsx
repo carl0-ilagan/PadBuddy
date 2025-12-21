@@ -19,7 +19,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db, database } from '@/lib/firebase';
 import { doc, getDoc, collection, getDocs, updateDoc, query, where, onSnapshot } from 'firebase/firestore';
-import { ref, get, onValue, update } from 'firebase/database';
+import { ref, get, onValue, set } from 'firebase/database';
 import NotificationBell from "@/components/NotificationBell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,7 +69,7 @@ export default function DeviceDetail() {
   const { useLiveNPK } = require('@/lib/hooks/useLiveNPK');
   const liveNPK = useLiveNPK(deviceId);
 
-  // Fetch weather data based on device GPS location
+  // Fetch temperature and humidity data (from device sensors or weather API)
   useEffect(() => {
     const fetchWeatherData = async () => {
       if (!deviceId) {
@@ -77,34 +77,61 @@ export default function DeviceDetail() {
         return;
       }
       
-      console.log('[Weather] Fetching weather for device:', deviceId);
+      console.log('[Weather] Fetching temperature/humidity for device:', deviceId);
       setWeatherData(prev => ({ ...prev, loading: true }));
       
       try {
-        // First, try to get cached weather data from RTDB (if available and recent)
-        const weatherRef = ref(database, `devices/${deviceId}/weather`);
-        const weatherSnapshot = await get(weatherRef);
-        
-        if (weatherSnapshot.exists()) {
-          const cachedWeather = weatherSnapshot.val();
-          const cacheAge = Date.now() - (cachedWeather.timestamp || 0);
-          const maxCacheAge = 10 * 60 * 1000; // 10 minutes
+        // Strategy 1: Check for device sensor data first (most accurate)
+        try {
+          const sensorsRef = ref(database, `devices/${deviceId}/sensors`);
+          const sensorsSnapshot = await get(sensorsRef);
           
-          // Use cached data if it's less than 10 minutes old
-          if (cacheAge < maxCacheAge && (cachedWeather.temperature !== null || cachedWeather.humidity !== null)) {
-            console.log('[Weather] Using cached weather data');
-            setWeatherData({
-              temperature: cachedWeather.temperature ?? null,
-              humidity: cachedWeather.humidity ?? null,
-              loading: false
-            });
-            // Still fetch fresh data in background (don't await)
-            fetchFreshWeather();
-            return;
+          if (sensorsSnapshot.exists()) {
+            const sensors = sensorsSnapshot.val();
+            if (sensors.temperature !== undefined || sensors.humidity !== undefined) {
+              console.log('[Weather] Using device sensor data');
+              setWeatherData({
+                temperature: sensors.temperature ?? null,
+                humidity: sensors.humidity ?? null,
+                loading: false
+              });
+              // Still try to fetch weather API in background for comparison
+              fetchFreshWeather().catch(() => {}); // Ignore errors
+              return;
+            }
           }
+        } catch (sensorError) {
+          console.log('[Weather] No device sensor data available:', sensorError);
         }
         
-        // No valid cache, fetch fresh data
+        // Strategy 2: Try cached weather data from RTDB (if available and recent)
+        try {
+          const weatherRef = ref(database, `devices/${deviceId}/weather`);
+          const weatherSnapshot = await get(weatherRef);
+          
+          if (weatherSnapshot.exists()) {
+            const cachedWeather = weatherSnapshot.val();
+            const cacheAge = Date.now() - (cachedWeather.timestamp || 0);
+            const maxCacheAge = 10 * 60 * 1000; // 10 minutes
+            
+            // Use cached data if it's less than 10 minutes old
+            if (cacheAge < maxCacheAge && (cachedWeather.temperature !== null || cachedWeather.humidity !== null)) {
+              console.log('[Weather] Using cached weather data');
+              setWeatherData({
+                temperature: cachedWeather.temperature ?? null,
+                humidity: cachedWeather.humidity ?? null,
+                loading: false
+              });
+              // Still fetch fresh data in background (don't await)
+              fetchFreshWeather().catch(() => {}); // Ignore errors
+              return;
+            }
+          }
+        } catch (cacheError) {
+          console.log('[Weather] No cached weather data:', cacheError);
+        }
+        
+        // Strategy 3: Fetch fresh data from weather API
         await fetchFreshWeather();
       } catch (error) {
         console.error('[Weather] Error fetching weather data:', error);
@@ -114,27 +141,50 @@ export default function DeviceDetail() {
     
     const fetchFreshWeather = async () => {
       try {
-        // Get GPS coordinates from RTDB
-        const gpsRef = ref(database, `devices/${deviceId}/gps`);
-        const gpsSnapshot = await get(gpsRef);
+        // Get GPS coordinates from RTDB - try both gps and location paths
+        let lat: number | null = null;
+        let lng: number | null = null;
         
-        if (!gpsSnapshot.exists()) {
-          console.log('[Weather] No GPS data found in RTDB');
-          setWeatherData({ temperature: null, humidity: null, loading: false });
-          return;
+        // Try gps path first (preferred format)
+        try {
+          const gpsRef = ref(database, `devices/${deviceId}/gps`);
+          const gpsSnapshot = await get(gpsRef);
+          
+          if (gpsSnapshot.exists()) {
+            const gps = gpsSnapshot.val();
+            lat = gps.lat ?? null;
+            lng = gps.lng ?? null;
+            console.log('[Weather] GPS data from gps path:', { lat, lng });
+          }
+        } catch (gpsError) {
+          console.log('[Weather] No GPS data at gps path');
         }
         
-        const gps = gpsSnapshot.val();
-        console.log('[Weather] GPS data:', gps);
+        // Fallback to location path if gps path didn't work
+        if (!lat || !lng) {
+          try {
+            const locationRef = ref(database, `devices/${deviceId}/location`);
+            const locationSnapshot = await get(locationRef);
+            
+            if (locationSnapshot.exists()) {
+              const location = locationSnapshot.val();
+              lat = location.latitude ?? location.lat ?? null;
+              lng = location.longitude ?? location.lng ?? null;
+              console.log('[Weather] GPS data from location path:', { lat, lng });
+            }
+          } catch (locationError) {
+            console.log('[Weather] No GPS data at location path');
+          }
+        }
         
-        if (!gps.lat || !gps.lng) {
-          console.log('[Weather] GPS missing lat/lng');
+        if (!lat || !lng) {
+          console.log('[Weather] No GPS coordinates available, cannot fetch weather');
           setWeatherData({ temperature: null, humidity: null, loading: false });
           return;
         }
         
         // Fetch weather from Open-Meteo API (free, no API key required)
-        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${gps.lat}&longitude=${gps.lng}&current=temperature_2m,relative_humidity_2m&timezone=auto`;
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m&timezone=auto`;
         console.log('[Weather] Fetching from:', weatherUrl);
         const response = await fetch(weatherUrl);
         
@@ -158,15 +208,20 @@ export default function DeviceDetail() {
         
         // Store weather data to RTDB for historical record
         if (temperature !== null || humidity !== null) {
-          console.log('[Weather] Storing to RTDB...');
-          const weatherRef = ref(database, `devices/${deviceId}/weather`);
-          await update(weatherRef, {
-            temperature,
-            humidity,
-            timestamp: Date.now(),
-            source: 'open-meteo'
-          });
-          console.log('[Weather] Stored successfully');
+          try {
+            console.log('[Weather] Storing to RTDB...');
+            const weatherRef = ref(database, `devices/${deviceId}/weather`);
+            await set(weatherRef, {
+              temperature,
+              humidity,
+              timestamp: Date.now(),
+              source: 'open-meteo'
+            });
+            console.log('[Weather] Stored successfully');
+          } catch (writeError) {
+            console.error('[Weather] Error storing to RTDB (non-critical):', writeError);
+            // Don't fail the whole operation if RTDB write fails
+          }
         }
       } catch (error) {
         console.error('[Weather] Error fetching fresh weather data:', error);
