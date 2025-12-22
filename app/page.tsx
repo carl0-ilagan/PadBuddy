@@ -38,6 +38,7 @@ export default function Home() {
   const [fieldName, setFieldName] = useState("");
   const [fieldDescription, setFieldDescription] = useState("");
   const [riceVariety, setRiceVariety] = useState("");
+  const [plantingMethod, setPlantingMethod] = useState<"transplant" | "direct-planting">("transplant");
   const [startDay, setStartDay] = useState("");
   const [errors, setErrors] = useState<{[key: string]: string}>({});
   
@@ -65,6 +66,7 @@ export default function Home() {
     
     if (!fieldName.trim()) newErrors.fieldName = "Please enter a field name";
     if (!riceVariety) newErrors.riceVariety = "Please select a rice variety";
+    if (!plantingMethod) newErrors.plantingMethod = "Please select a planting method";
     if (!startDay) newErrors.startDay = "Please select a start date";
     
     if (Object.keys(newErrors).length > 0) {
@@ -266,6 +268,7 @@ export default function Home() {
         fieldName,
         description: fieldDescription,
         riceVariety,
+        plantingMethod,
         startDay,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -323,6 +326,7 @@ export default function Home() {
       setFieldName("");
       setFieldDescription("");
       setRiceVariety("");
+      setPlantingMethod("transplant");
       setStartDay("");
       setPaddyName("");
       setPaddyDescription("");
@@ -629,6 +633,38 @@ export default function Home() {
                             {errors.riceVariety}
                           </p>
                         )}
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Planting Method
+                        </label>
+                        <select
+                          value={plantingMethod}
+                          onChange={(e) => {
+                            setPlantingMethod(e.target.value as "transplant" | "direct-planting");
+                            setErrors(prev => ({...prev, plantingMethod: ""}));
+                          }}
+                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900 ${
+                            errors.plantingMethod ? 'border-red-400 bg-red-50' : 'border-gray-300'
+                          }`}
+                        >
+                          <option value="transplant">Transplant (with pre-planting activities)</option>
+                          <option value="direct-planting">Direct Planting</option>
+                        </select>
+                        {errors.plantingMethod && (
+                          <p className="text-red-500 text-sm mt-1.5 flex items-center gap-1">
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                            {errors.plantingMethod}
+                          </p>
+                        )}
+                        <p className="text-xs text-gray-500 mt-1.5">
+                          {plantingMethod === "transplant" 
+                            ? "Includes seedbed preparation and seedling activities before transplanting. You can select a past date - the system will calculate how many days have passed."
+                            : "Direct seeding into the field without pre-planting activities. You can select a past date - the system will calculate how many days have passed."}
+                        </p>
                       </div>
                       
                       <div>

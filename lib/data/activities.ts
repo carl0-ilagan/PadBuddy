@@ -9,6 +9,95 @@ export interface Activity {
   type: 'required' | 'conditional' | 'advisory';
 }
 
+// Pre-planting activities for transplant method (negative days before transplanting)
+export interface PrePlantingActivity {
+  day: number; // Negative days before transplant (e.g., -21, -14, -7, -1)
+  action: string;
+  water?: string;
+  fertilizer?: string;
+  notes?: string;
+  type: 'required' | 'conditional' | 'advisory';
+}
+
+export const PRE_PLANTING_ACTIVITIES: PrePlantingActivity[] = [
+  {
+    day: -21,
+    action: 'Prepare seedbed area',
+    notes: 'Select well-drained area, 1/10 of main field size',
+    type: 'required'
+  },
+  {
+    day: -21,
+    action: 'Level and prepare seedbed',
+    notes: 'Ensure proper leveling for uniform water distribution',
+    type: 'required'
+  },
+  {
+    day: -18,
+    action: 'Apply organic matter to seedbed',
+    fertilizer: 'Apply compost or well-decomposed manure',
+    type: 'advisory'
+  },
+  {
+    day: -14,
+    action: 'Soak seeds for 24 hours',
+    water: 'Soak in clean water',
+    notes: 'Pre-germination treatment',
+    type: 'required'
+  },
+  {
+    day: -13,
+    action: 'Incubate seeds for 24-48 hours',
+    notes: 'Keep moist until radicle emerges (1-2mm)',
+    type: 'required'
+  },
+  {
+    day: -11,
+    action: 'Sow pre-germinated seeds in seedbed',
+    water: 'Maintain moist seedbed',
+    notes: 'Broadcast or drill seeds evenly',
+    type: 'required'
+  },
+  {
+    day: -7,
+    action: 'Monitor seedbed moisture',
+    water: 'Keep seedbed moist, avoid flooding',
+    type: 'required'
+  },
+  {
+    day: -7,
+    action: 'Apply seedbed fertilizer',
+    fertilizer: 'Apply 14-14-14 or similar compound fertilizer',
+    type: 'advisory'
+  },
+  {
+    day: -3,
+    action: 'Prepare main field for transplanting',
+    notes: 'Plow, harrow, and level the main field',
+    type: 'required'
+  },
+  {
+    day: -3,
+    action: 'Apply basal fertilizer to main field',
+    fertilizer: 'Apply 14-14-14 or recommended basal fertilizer',
+    notes: 'Based on soil test results',
+    type: 'required'
+  },
+  {
+    day: -1,
+    action: 'Final field preparation',
+    water: 'Saturate soil, maintain shallow water (2-3 cm)',
+    notes: 'Ensure field is ready for transplanting',
+    type: 'required'
+  },
+  {
+    day: -1,
+    action: 'Check seedling age and health',
+    notes: 'Seedlings should be 15-21 days old, healthy and ready',
+    type: 'required'
+  }
+];
+
 export interface StageActivities {
   [key: string]: Activity[];
 }

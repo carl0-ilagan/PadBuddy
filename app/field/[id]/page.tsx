@@ -24,7 +24,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { getVarietyByName } from '@/lib/utils/varietyHelpers';
 import { getCurrentStage, getDaysSincePlanting, getExpectedHarvestDate, getGrowthProgress } from '@/lib/utils/stageCalculator';
-import { ACTIVITIES } from '@/lib/data/activities';
+import { ACTIVITIES, PRE_PLANTING_ACTIVITIES } from '@/lib/data/activities';
 import { VARIETY_ACTIVITY_TRIGGERS } from '@/lib/data/activityTriggers';
 
 /**
@@ -856,17 +856,50 @@ function OverviewTab({ field, paddies }: { field: any; paddies: any[] }) {
   }
   
   const daysSincePlanting = getDaysSincePlanting(field.startDay);
+  const plantingMethod = field.plantingMethod || 'transplant'; // Default to transplant for backward compatibility
   const currentStage = getCurrentStage(variety, daysSincePlanting);
   const expectedHarvest = getExpectedHarvestDate(field.startDay, variety);
   const progress = getGrowthProgress(variety, daysSincePlanting);
 
+  // Get pre-planting activities for transplant method (negative days before transplant)
+  const prePlantingActivities = plantingMethod === 'transplant' 
+    ? PRE_PLANTING_ACTIVITIES.map(activity => ({
+        ...activity,
+        day: activity.day, // Keep negative days for pre-planting
+        _isPrePlanting: true
+      }))
+    : [];
+
   // Get variety-specific activities for current day and upcoming activities
-  const currentAndUpcomingActivities = variety.activities
+  const regularActivities = variety.activities
     .filter(activity => 
       activity.day >= daysSincePlanting && 
       activity.day <= (currentStage?.endDay || daysSincePlanting + 7)
     )
     .sort((a, b) => a.day - b.day);
+
+  // Combine pre-planting and regular activities
+  // For pre-planting: show all pre-planting activities if transplant method is selected
+  // They will be marked as past if daysSincePlanting > 0 (transplant already happened)
+  const allActivities = [
+    ...(plantingMethod === 'transplant' ? prePlantingActivities : []),
+    ...regularActivities
+  ].sort((a, b) => a.day - b.day);
+
+  // Filter to show relevant activities (pre-planting + current/upcoming regular activities)
+  // Show pre-planting activities if transplant method, and regular activities based on current day
+  const currentAndUpcomingActivities = allActivities.filter(activity => {
+    const isPrePlanting = (activity as any)._isPrePlanting;
+    
+    if (isPrePlanting) {
+      // Always show pre-planting activities for transplant method (they'll be marked as past if applicable)
+      return true;
+    } else {
+      // Show regular activities that are current or upcoming
+      return activity.day >= daysSincePlanting && 
+             activity.day <= (currentStage?.endDay || daysSincePlanting + 7);
+    }
+  }).sort((a, b) => a.day - b.day);
 
   const varietyTriggers = VARIETY_ACTIVITY_TRIGGERS[field.riceVariety] || [];
   const currentTriggers = varietyTriggers.filter(t => t.stage === currentStage?.name);
@@ -1016,7 +1049,11 @@ function OverviewTab({ field, paddies }: { field: any; paddies: any[] }) {
         {currentAndUpcomingActivities.length > 0 ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-gray-700">Upcoming Activities</h3>
+              <h3 className="text-sm font-semibold text-gray-700">
+                {daysSincePlanting < 0 ? 'Pre-Planting & Upcoming Activities' : 
+                 daysSincePlanting === 0 ? 'Today & Upcoming Activities' :
+                 'Activities & Tasks'}
+              </h3>
               <span className="text-xs text-gray-500">
                 {Object.values(completedTasks).filter(Boolean).length} / {currentAndUpcomingActivities.length} completed
               </span>
@@ -1024,9 +1061,15 @@ function OverviewTab({ field, paddies }: { field: any; paddies: any[] }) {
             {currentAndUpcomingActivities.map((activity, index) => {
               const taskKey = `day-${activity.day}-${index}`;
               const isCompleted = Boolean(completedTasks[taskKey]);
+              const isPrePlanting = (activity as any)._isPrePlanting;
               const daysDiff = activity.day - daysSincePlanting;
               const isPast = daysDiff < 0;
               const isToday = daysDiff === 0;
+              
+              // For pre-planting activities, show days before transplant
+              const displayDay = isPrePlanting 
+                ? `${Math.abs(activity.day)} days before transplant`
+                : activity.day;
               
               return (
                 <div 
@@ -1036,6 +1079,8 @@ function OverviewTab({ field, paddies }: { field: any; paddies: any[] }) {
                       ? 'bg-green-50 hover:bg-green-100 border border-green-200' 
                       : isToday 
                       ? 'bg-yellow-50 hover:bg-yellow-100 border border-yellow-300'
+                      : isPrePlanting
+                      ? 'bg-purple-50 hover:bg-purple-100 border border-purple-200'
                       : 'bg-gray-50 hover:bg-gray-100'
                   }`}
                   onClick={() => !loadingTasks && toggleTask(taskKey)}
@@ -1053,13 +1098,24 @@ function OverviewTab({ field, paddies }: { field: any; paddies: any[] }) {
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
                         isToday ? 'bg-yellow-200 text-yellow-900' :
                         isPast ? 'bg-red-100 text-red-700' :
+                        isPrePlanting && isPast ? 'bg-purple-100 text-purple-700' :
+                        isPrePlanting ? 'bg-purple-200 text-purple-900' :
                         'bg-blue-100 text-blue-700'
                       }`}>
-                        {isToday ? 'TODAY' : isPast ? `Day ${activity.day}` : `Day ${activity.day} (in ${daysDiff} days)`}
+                        {isToday ? 'TODAY' : 
+                         isPrePlanting && isPast ? `${displayDay} (completed)` :
+                         isPrePlanting ? displayDay :
+                         isPast ? `Day ${activity.day} (${Math.abs(daysDiff)} days ago)` : 
+                         `Day ${activity.day} (in ${daysDiff} days)`}
                       </span>
                       {activity.type && (
                         <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-700 capitalize">
                           {activity.type.replace('-', ' ')}
+                        </span>
+                      )}
+                      {isPrePlanting && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700">
+                          Pre-Planting
                         </span>
                       )}
                     </div>
@@ -2478,14 +2534,15 @@ function InformationTab({ field, onFieldUpdate }: { field: any; onFieldUpdate: (
             <p className="text-sm text-gray-600 mb-1">Rice Variety</p>
             <p className="text-lg font-medium text-gray-900">{field.riceVariety}</p>
           </div>
-          {variety?.plantingMethod && (
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Planting Method</p>
-              <p className="text-lg font-medium text-gray-900 capitalize">
-                {variety.plantingMethod.map(m => m.replace('-', ' ')).join(' / ')}
-              </p>
-            </div>
-          )}
+          <div>
+            <p className="text-sm text-gray-600 mb-1">Planting Method</p>
+            <p className="text-lg font-medium text-gray-900 capitalize">
+              {field.plantingMethod === 'transplant' ? 'Transplant' : 
+               field.plantingMethod === 'direct-planting' ? 'Direct Planting' :
+               variety?.plantingMethod ? variety.plantingMethod.map(m => m.replace('-', ' ')).join(' / ') :
+               'Not specified'}
+            </p>
+          </div>
           <div>
             <p className="text-sm text-gray-600 mb-1">Start Date (Day 0)</p>
             <p className="text-lg font-medium text-gray-900">
